@@ -1,0 +1,73 @@
+import { contextBridge, ipcRenderer } from 'electron'
+import { electronAPI } from '@electron-toolkit/preload'
+import type { PreloadApi } from '../shared/api'
+import type { AgentId } from '../shared/types'
+
+// 渲染进程可用的白名单 API，全部经 IPC 走主进程
+const api: PreloadApi = {
+  agentsStatus: () => ipcRenderer.invoke('agents:status'),
+  readProviders: (agentId) => ipcRenderer.invoke('providers:read', agentId),
+  writeProviders: (agentId, map) => ipcRenderer.invoke('providers:write', agentId, map),
+  readSwitch: (agentId) => ipcRenderer.invoke('switch:read', agentId),
+  writeSwitch: (agentId, state) => ipcRenderer.invoke('switch:write', agentId, state),
+  fetchRemoteModels: (payload) => ipcRenderer.invoke('models:fetch-remote', payload),
+  showConfigInFolder: (agentId) => ipcRenderer.invoke('config:show-in-folder', agentId),
+  readRawConfig: (agentId, kind) => ipcRenderer.invoke('config:read-raw', agentId, kind),
+  writeRawConfig: (agentId, kind, content) =>
+    ipcRenderer.invoke('config:write-raw', agentId, kind, content),
+  readAppConfig: () => ipcRenderer.invoke('app-config:read'),
+  writeAppConfig: (config) => ipcRenderer.invoke('app-config:write', config),
+  showAppConfigInFolder: () => ipcRenderer.invoke('app-config:show-in-folder'),
+  changeAppConfigDir: () => ipcRenderer.invoke('app-config:change-dir'),
+  openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
+  listSkills: () => ipcRenderer.invoke('skills:list'),
+  setSkillSync: (dir, agentId, enabled) => ipcRenderer.invoke('skills:sync', dir, agentId, enabled),
+  deleteSkill: (dir) => ipcRenderer.invoke('skills:delete', dir),
+  fetchRepoSkills: (input, branch) => ipcRenderer.invoke('skills:repo-skills', input, branch),
+  installSkills: (repo, branch, paths) => ipcRenderer.invoke('skills:install', repo, branch, paths),
+  checkSkillUpdates: () => ipcRenderer.invoke('skills:check-updates'),
+  updateSkill: (dir) => ipcRenderer.invoke('skills:update', dir),
+  searchSkillsSh: (query) => ipcRenderer.invoke('skills:search-sh', query),
+  changeSkillsDir: () => ipcRenderer.invoke('skills:change-dir'),
+  resyncSkills: (mode) => ipcRenderer.invoke('skills:resync', mode),
+  showSkillsDirInFolder: () => ipcRenderer.invoke('skills:show-in-folder'),
+  listMcpServers: () => ipcRenderer.invoke('mcp:list'),
+  mcpStorePath: () => ipcRenderer.invoke('mcp:store-path'),
+  showMcpInFolder: () => ipcRenderer.invoke('mcp:show-in-folder'),
+  saveMcpServer: (originalName, name, config) =>
+    ipcRenderer.invoke('mcp:save', originalName, name, config),
+  deleteMcpServer: (name) => ipcRenderer.invoke('mcp:delete', name),
+  toggleMcpServer: (name, agentId, enabled) =>
+    ipcRenderer.invoke('mcp:toggle', name, agentId, enabled),
+  sessionRoots: () => ipcRenderer.invoke('sessions:roots'),
+  listSessions: () => ipcRenderer.invoke('sessions:list'),
+  readSessionRaw: (filePath) => ipcRenderer.invoke('sessions:read-raw', filePath),
+  deleteSessions: (filePaths) => ipcRenderer.invoke('sessions:delete', filePaths),
+  showSessionInFolder: (filePath) => ipcRenderer.invoke('sessions:show-in-folder', filePath),
+  addSessionDir: () => ipcRenderer.invoke('sessions:add-dir'),
+  onStateChanged: (callback) => {
+    const listener = (_e: Electron.IpcRendererEvent, agentId: AgentId): void => callback(agentId)
+    ipcRenderer.on('state-changed', listener)
+    return () => ipcRenderer.removeListener('state-changed', listener)
+  },
+  onCloseRequested: (callback) => {
+    const listener = (): void => callback()
+    ipcRenderer.on('close-requested', listener)
+    return () => ipcRenderer.removeListener('close-requested', listener)
+  },
+  closeAction: (action) => ipcRenderer.send('window:close-action', action)
+}
+
+if (process.contextIsolated) {
+  try {
+    contextBridge.exposeInMainWorld('electron', electronAPI)
+    contextBridge.exposeInMainWorld('api', api)
+  } catch (error) {
+    console.error(error)
+  }
+} else {
+  // @ts-ignore (define in dts)
+  window.electron = electronAPI
+  // @ts-ignore (define in dts)
+  window.api = api
+}

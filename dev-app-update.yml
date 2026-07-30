@@ -1,0 +1,4 @@
+provider: github
+owner: ddz12123
+repo: omp-switch
+updaterCacheDirName: omp-switch-updater

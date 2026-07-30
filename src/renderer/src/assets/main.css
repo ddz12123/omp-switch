@@ -1,0 +1,147 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* shadcn/ui 主题变量（zinc 色板），默认深色见 index.html 的 .dark
+   浅色背景用极浅的灰白，让白色卡片自然浮起（Apple 式层次） */
+:root {
+  --radius: 0.75rem;
+  --background: oklch(0.977 0.0025 285.823);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.957 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.957 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
+  /* Apple 风格动效曲线：快速起步、平滑收尾（近似临界阻尼弹簧） */
+  --ease-fluid: cubic-bezier(0.3, 1, 0.4, 1);
+}
+
+.dark {
+  --background: oklch(0.13 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.185 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.92 0.004 286.32);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.264 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    user-select: none;
+    /* 系统字体自带光学尺寸与字距表（apple-design §15） */
+    font-family:
+      system-ui,
+      -apple-system,
+      'Segoe UI',
+      sans-serif;
+  }
+  input,
+  textarea {
+    user-select: text;
+  }
+
+  /* 标题收紧字距：大字号下默认字距偏松（apple-design §15） */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+  }
+
+  /* Tailwind 4 preflight 把 button 光标改成了 default，恢复可点击元素的手型 */
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* 反馈发生在按下瞬间，不是松开之后（apple-design §1）。
+     只做 transform，不影响布局；无 transition 类的元素给个 100ms 回弹。
+     下拉触发器除外：Radix 在按下瞬间打开弹层并按触发器矩形定位，
+     按压缩放会让弹层先按缩小后的矩形定位、松手后又跟着重定位，视觉上抖一下 */
+  button:not(:disabled):not([data-slot='select-trigger']),
+  [role='button']:not(:disabled) {
+    transition: transform 100ms ease-out;
+  }
+  button:not(:disabled):not([data-slot='select-trigger']):active,
+  [role='button']:not(:disabled):active {
+    transform: scale(0.97);
+  }
+
+  /* 滚动条：新 Chromium(121+) 在 Windows 上默认 Fluent 样式（带箭头按钮），
+     且设置标准属性后 ::-webkit-scrollbar 会被忽略，所以统一用标准属性：
+     thin = 细条无箭头，颜色跟随主题变量 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--muted-foreground) 40%, transparent) transparent;
+  }
+
+  /* 减弱动效偏好：保留状态反馈，去掉位移/缩放（apple-design §14） */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+    button:not(:disabled):active,
+    [role='button']:not(:disabled):active {
+      transform: none;
+    }
+  }
+}

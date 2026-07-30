@@ -1,0 +1,53 @@
+name: Release
+
+# 推送 v 开头的 tag（如 v1.0.0）时触发，或在 Actions 页手动触发
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# electron-builder 用内置的 GITHUB_TOKEN 创建 Release 并上传产物，需要写权限
+permissions:
+  contents: write
+
+# 同一个 tag 重复推送时，取消上一次未完成的运行
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: '--win'
+          - os: macos-latest
+            args: '--mac'
+          - os: ubuntu-latest
+            # 跳过 snap：CI 上构建 snap 需要额外的 snapcraft 工具链，容易失败
+            args: '--linux AppImage deb'
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查 + 构建 + 打包并发布到 Releases
+        run: |
+          npm run build
+          npx electron-builder ${{ matrix.args }} --publish always
+        env:
+          # electron-builder 读取 GH_TOKEN 上传到 GitHub Releases
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
