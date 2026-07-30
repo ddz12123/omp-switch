@@ -17,7 +17,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 先单独把草稿 Release 建好，避免三平台并行各自创建导致重复草稿
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 计算 tag 并创建草稿（已存在则跳过）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "$TAG" --notes "release $TAG"
+          fi
+
   release:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
