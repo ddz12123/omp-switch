@@ -15,6 +15,7 @@ import type {
 import type { FetchRemoteModelsPayload } from '../shared/api'
 import { getAdapter, getAgentStatuses } from './agents'
 import { fetchRemoteModels } from './remoteModels'
+import { getCliVersions } from './cliVersion'
 import { changeConfigDir, getAppConfigPath, readAppConfig, writeAppConfig } from './appConfig'
 import {
   deleteSkill,
@@ -92,6 +93,8 @@ export function registerIpc(refreshTray: () => void): void {
   ipcMain.handle('models:fetch-remote', (_e, payload: FetchRemoteModelsPayload) =>
     fetchRemoteModels(payload)
   )
+
+  ipcMain.handle('cli:versions', () => getCliVersions())
 
   ipcMain.handle('config:show-in-folder', (_e, agentId: AgentId) => {
     shell.showItemInFolder(getAdapter(agentId).providersPath)

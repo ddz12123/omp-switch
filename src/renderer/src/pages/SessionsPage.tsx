@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { FileText, FolderOpen, ListChecks, RefreshCw, Search, Trash2 } from 'lucide-react'
-import type { SessionMeta, SessionRaw, SessionRootInfo } from '@shared/types'
+import {
+  ArrowLeft,
+  FileText,
+  FolderOpen,
+  ListChecks,
+  RefreshCw,
+  Search,
+  Trash2
+} from 'lucide-react'
+import type { AgentId, SessionMeta, SessionRaw, SessionRootInfo } from '@shared/types'
+import { AGENT_IDS } from '@shared/types'
 import { monaco } from '../lib/monaco'
 import { errorMessage } from '../stores/app'
 import { cn } from '../lib/utils'
+import { AgentIcon } from '../components/AgentIcon'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -55,6 +65,13 @@ function rootBadge(root: SessionRootInfo): string {
     default:
       return '自定义'
   }
+}
+
+/** 会话根目录对应的 Agent（仅默认目录能明确归属，其余返回 null） */
+function rootAgent(root: SessionRootInfo): AgentId | null {
+  if (root.kind === 'omp-default') return 'omp'
+  if (root.kind === 'pi-default') return 'pi'
+  return null
 }
 
 /** 只读 Monaco 展示单个会话的原始 JSONL；filePath 变化时整体重挂 */
@@ -135,7 +152,7 @@ function MetaRow({ label, value }: { label: string; value: string }): React.JSX.
   )
 }
 
-export default function SessionsPage(): React.JSX.Element {
+export default function SessionsPage({ onBack }: { onBack?: () => void }): React.JSX.Element {
   const [roots, setRoots] = useState<SessionRootInfo[]>([])
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [loading, setLoading] = useState(true)
@@ -236,11 +253,30 @@ export default function SessionsPage(): React.JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="flex shrink-0 items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">会话管理</h2>
-          <p className="text-muted-foreground mt-0.5 text-sm">
-            按目录浏览 pi / omp 的历史会话，支持查看原文与删除（共 {sessions.length} 个）
-          </p>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="icon"
+            className="shrink-0 rounded-full"
+            title="返回"
+            onClick={onBack}
+          >
+            <ArrowLeft />
+          </Button>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">会话管理</h2>
+              {/* 会话跨 Agent 汇总，标注覆盖的 Agent */}
+              <span className="flex items-center gap-1">
+                {AGENT_IDS.map((id) => (
+                  <AgentIcon key={id} agent={id} className="size-4" />
+                ))}
+              </span>
+            </div>
+            <p className="text-muted-foreground mt-0.5 text-sm">
+              按目录浏览 pi / omp 的历史会话，支持查看原文与删除（共 {sessions.length} 个）
+            </p>
+          </div>
         </div>
         <Button variant="outline" size="sm" title="重新读取" onClick={() => void load()}>
           <RefreshCw />
@@ -277,11 +313,17 @@ export default function SessionsPage(): React.JSX.Element {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部目录（{sessions.length}）</SelectItem>
-              {filterRoots.map((root) => (
-                <SelectItem key={root.id} value={root.id}>
-                  {root.label}（{countByRoot.get(root.id) ?? 0}）
-                </SelectItem>
-              ))}
+              {filterRoots.map((root) => {
+                const agent = rootAgent(root)
+                return (
+                  <SelectItem key={root.id} value={root.id}>
+                    <span className="flex items-center gap-2">
+                      {agent && <AgentIcon agent={agent} className="size-4" />}
+                      {root.label}（{countByRoot.get(root.id) ?? 0}）
+                    </span>
+                  </SelectItem>
+                )
+              })}
             </SelectContent>
           </Select>
 
@@ -317,6 +359,7 @@ export default function SessionsPage(): React.JSX.Element {
                 {visible.map((s) => {
                   const isActive = s.filePath === activeFilePath
                   const itemRoot = roots.find((r) => r.id === s.rootId) ?? null
+                  const itemAgent = itemRoot ? rootAgent(itemRoot) : null
                   return (
                     <div
                       key={s.filePath}
@@ -344,10 +387,17 @@ export default function SessionsPage(): React.JSX.Element {
                         </span>
                         <div className="text-muted-foreground flex items-center gap-2 text-[11px]">
                           <span className="shrink-0">{relativeTime(s.updatedAt)}</span>
-                          {rootFilter === 'all' && itemRoot && (
-                            <Badge variant="secondary" className="shrink-0 text-[10px]">
-                              {rootBadge(itemRoot)}
-                            </Badge>
+                          {itemAgent ? (
+                            <span className="flex shrink-0 items-center" title={itemRoot?.label}>
+                              <AgentIcon agent={itemAgent} className="size-3.5" />
+                            </span>
+                          ) : (
+                            rootFilter === 'all' &&
+                            itemRoot && (
+                              <Badge variant="secondary" className="shrink-0 text-[10px]">
+                                {rootBadge(itemRoot)}
+                              </Badge>
+                            )
                           )}
                           {s.model && (
                             <Badge variant="outline" className="truncate text-[10px]">

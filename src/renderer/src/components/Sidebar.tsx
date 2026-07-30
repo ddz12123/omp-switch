@@ -1,4 +1,4 @@
-import { ArrowLeftRight, MessagesSquare, Plug, Server, Settings, Wrench } from 'lucide-react'
+import { ArrowLeftRight, Server, Settings } from 'lucide-react'
 import { useApp, type PageId } from '../stores/app'
 import { cn } from '../lib/utils'
 
@@ -10,10 +10,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'providers', label: '供应商', icon: Server },
-  { id: 'switch', label: '模型切换', icon: ArrowLeftRight },
-  { id: 'skills', label: 'Skills', icon: Wrench },
-  { id: 'mcp', label: 'MCP', icon: Plug },
-  { id: 'sessions', label: '会话', icon: MessagesSquare }
+  { id: 'switch', label: '模型切换', icon: ArrowLeftRight }
 ]
 
 const SETTINGS_ITEM: NavItem = { id: 'settings', label: '设置', icon: Settings }

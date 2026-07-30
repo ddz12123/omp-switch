@@ -766,7 +766,7 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id']
 
-export default function SkillsPage(): React.JSX.Element {
+export default function SkillsPage({ onBack }: { onBack?: () => void }): React.JSX.Element {
   const { statuses, agentOrder } = useApp()
   const [tab, setTab] = useState<TabId>('installed')
   /** 是否处于「管理仓库」子页面 */
@@ -887,11 +887,22 @@ export default function SkillsPage(): React.JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="flex shrink-0 items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold">Skills 管理</h2>
-          <p className="text-muted-foreground mt-0.5 text-sm">
-            技能统一存在中央目录，通过开关同步到各 Agent 的全局技能目录
-          </p>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="icon"
+            className="shrink-0 rounded-full"
+            title="返回"
+            onClick={onBack}
+          >
+            <ArrowLeft />
+          </Button>
+          <div>
+            <h2 className="text-lg font-semibold">Skills 管理</h2>
+            <p className="text-muted-foreground mt-0.5 text-sm">
+              技能统一存在中央目录，通过开关同步到各 Agent 的全局技能目录
+            </p>
+          </div>
         </div>
         {/* 分段 tab：已安装 / 技能仓库 */}
         <div className="bg-muted flex shrink-0 rounded-lg p-0.5">

@@ -11,6 +11,7 @@ const api: PreloadApi = {
   readSwitch: (agentId) => ipcRenderer.invoke('switch:read', agentId),
   writeSwitch: (agentId, state) => ipcRenderer.invoke('switch:write', agentId, state),
   fetchRemoteModels: (payload) => ipcRenderer.invoke('models:fetch-remote', payload),
+  cliVersions: () => ipcRenderer.invoke('cli:versions'),
   showConfigInFolder: (agentId) => ipcRenderer.invoke('config:show-in-folder', agentId),
   readRawConfig: (agentId, kind) => ipcRenderer.invoke('config:read-raw', agentId, kind),
   writeRawConfig: (agentId, kind, content) =>

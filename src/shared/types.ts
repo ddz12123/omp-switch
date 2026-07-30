@@ -70,6 +70,26 @@ export interface AgentStatus {
   multiRole: boolean
 }
 
+/** 本地 CLI（pi/omp）版本检测结果，用于设置页「本地环境检查」 */
+export interface CliVersionInfo {
+  id: AgentId
+  label: string
+  /** 是否检测到本地已安装（能执行 <cli> --version 取到版本） */
+  installed: boolean
+  /** 本地当前版本（未安装时为空串） */
+  current: string
+  /** npm registry 上的最新版本（拉取失败时为空串） */
+  latest: string
+  /** latest 高于 current，存在可升级的新版本 */
+  hasUpdate: boolean
+  /** 安装 / 重装命令（常驻提供，任选其一在终端执行） */
+  installCommands: string[]
+  /** 升级命令（可能有多种方式，任选其一在终端执行；供用户复制自行升级） */
+  upgradeCommands: string[]
+  /** 拉取最新版本时的错误信息（失败时有） */
+  error?: string
+}
+
 /** 原始配置文件的类别：供应商文件 / 切换（角色映射）文件 */
 export type ConfigFileKind = 'providers' | 'switch'
 

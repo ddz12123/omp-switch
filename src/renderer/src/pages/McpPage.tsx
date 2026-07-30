@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Braces, FolderOpen, Loader2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import {
+  ArrowLeft,
+  Braces,
+  FolderOpen,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2
+} from 'lucide-react'
 import type { AgentId, McpServerConfig, McpServerInfo } from '@shared/types'
 import { AGENT_IDS } from '@shared/types'
 import { errorMessage, useApp } from '../stores/app'
@@ -235,7 +244,7 @@ function McpEditDialog({
   )
 }
 
-export default function McpPage(): React.JSX.Element {
+export default function McpPage({ onBack }: { onBack?: () => void }): React.JSX.Element {
   const { statuses, agentOrder } = useApp()
   const [servers, setServers] = useState<McpServerInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -290,13 +299,24 @@ export default function McpPage(): React.JSX.Element {
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">MCP 管理</h2>
-          <p className="text-muted-foreground mt-0.5 text-sm">
-            MCP 服务器统一存中央库，通过开关写入 / 移出各 Agent 的 mcp.json
-          </p>
+    <div className="flex min-h-0 flex-1 flex-col gap-5">
+      <div className="flex shrink-0 items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="icon"
+            className="shrink-0 rounded-full"
+            title="返回"
+            onClick={onBack}
+          >
+            <ArrowLeft />
+          </Button>
+          <div>
+            <h2 className="text-lg font-semibold">MCP 管理</h2>
+            <p className="text-muted-foreground mt-0.5 text-sm">
+              MCP 服务器统一存中央库，通过开关写入 / 移出各 Agent 的 mcp.json
+            </p>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button
@@ -319,77 +339,79 @@ export default function McpPage(): React.JSX.Element {
         </div>
       </div>
 
-      {loading && <div className="text-muted-foreground py-16 text-center text-sm">加载中…</div>}
+      <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+        {loading && <div className="text-muted-foreground py-16 text-center text-sm">加载中…</div>}
 
-      {!loading && servers.length === 0 && (
-        <div className="text-muted-foreground rounded-xl border border-dashed py-16 text-center text-sm">
-          还没有 MCP 服务器。点击「添加 MCP」新建，把服务器统一管理并同步到各 Agent。
-        </div>
-      )}
-
-      <div className="flex flex-col gap-2.5">
-        {servers.map((server) => (
-          <div
-            key={server.name}
-            className="bg-card flex items-center gap-4 rounded-xl border border-black/[0.06] px-4 py-3 shadow-xs dark:border-white/[0.08]"
-          >
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-medium">{server.name}</span>
-                <Badge variant="secondary" className="font-mono text-[10px]">
-                  {typeOf(server.config)}
-                </Badge>
-              </div>
-              <span className="text-muted-foreground/80 truncate font-mono text-xs">
-                {summarize(server.config)}
-              </span>
-            </div>
-
-            {/* 各 Agent 启用开关 */}
-            <div className="flex shrink-0 items-center gap-4">
-              {agentOrder.map((agentId) => {
-                const status = statuses.find((s) => s.id === agentId)
-                const enabled = server.agents.includes(agentId)
-                const busy = toggling === `${server.name}/${agentId}`
-                return (
-                  <div
-                    key={agentId}
-                    className="flex items-center gap-1.5"
-                    title={`${enabled ? '停用' : '启用到'} ${status?.label ?? agentId}`}
-                  >
-                    <AgentIcon agent={agentId} className="size-4.5" />
-                    <Switch
-                      checked={enabled}
-                      disabled={busy}
-                      onCheckedChange={(checked) => void handleToggle(server, agentId, checked)}
-                    />
-                  </div>
-                )
-              })}
-            </div>
-
-            <div className="flex shrink-0 gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-foreground"
-                title="编辑"
-                onClick={() => setEditing(server)}
-              >
-                <Pencil />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-destructive"
-                title="删除（会同时从所有 Agent 移除）"
-                onClick={() => setDeleting(server)}
-              >
-                <Trash2 />
-              </Button>
-            </div>
+        {!loading && servers.length === 0 && (
+          <div className="text-muted-foreground rounded-xl border border-dashed py-16 text-center text-sm">
+            还没有 MCP 服务器。点击「添加 MCP」新建，把服务器统一管理并同步到各 Agent。
           </div>
-        ))}
+        )}
+
+        <div className="flex flex-col gap-2.5">
+          {servers.map((server) => (
+            <div
+              key={server.name}
+              className="bg-card flex items-center gap-4 rounded-xl border border-black/[0.06] px-4 py-3 shadow-xs dark:border-white/[0.08]"
+            >
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium">{server.name}</span>
+                  <Badge variant="secondary" className="font-mono text-[10px]">
+                    {typeOf(server.config)}
+                  </Badge>
+                </div>
+                <span className="text-muted-foreground/80 truncate font-mono text-xs">
+                  {summarize(server.config)}
+                </span>
+              </div>
+
+              {/* 各 Agent 启用开关 */}
+              <div className="flex shrink-0 items-center gap-4">
+                {agentOrder.map((agentId) => {
+                  const status = statuses.find((s) => s.id === agentId)
+                  const enabled = server.agents.includes(agentId)
+                  const busy = toggling === `${server.name}/${agentId}`
+                  return (
+                    <div
+                      key={agentId}
+                      className="flex items-center gap-1.5"
+                      title={`${enabled ? '停用' : '启用到'} ${status?.label ?? agentId}`}
+                    >
+                      <AgentIcon agent={agentId} className="size-4.5" />
+                      <Switch
+                        checked={enabled}
+                        disabled={busy}
+                        onCheckedChange={(checked) => void handleToggle(server, agentId, checked)}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="flex shrink-0 gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-foreground"
+                  title="编辑"
+                  onClick={() => setEditing(server)}
+                >
+                  <Pencil />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-destructive"
+                  title="删除（会同时从所有 Agent 移除）"
+                  onClick={() => setDeleting(server)}
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {addOpen && (

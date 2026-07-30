@@ -3,6 +3,7 @@ import type {
   AgentStatus,
   AppConfig,
   AppConfigResult,
+  CliVersionInfo,
   ConfigFileKind,
   McpServerConfig,
   McpServerInfo,
@@ -35,6 +36,8 @@ export interface PreloadApi {
   writeSwitch(agentId: AgentId, state: SwitchState): Promise<void>
   /** 请求供应商 /models 接口，返回模型 id 列表 */
   fetchRemoteModels(payload: FetchRemoteModelsPayload): Promise<string[]>
+  /** 检测 pi / omp 命令行的当前版本与 npm 最新版本（本地环境检查） */
+  cliVersions(): Promise<CliVersionInfo[]>
   showConfigInFolder(agentId: AgentId): Promise<void>
   /** 读取原始配置文件文本（供 Monaco 编辑器直接编辑），文件不存在时 content 为空串 */
   readRawConfig(agentId: AgentId, kind: ConfigFileKind): Promise<RawConfigFile>

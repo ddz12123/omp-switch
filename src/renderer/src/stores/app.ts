@@ -15,9 +15,14 @@ import { getCloseBehavior, storeCloseBehavior, type CloseBehavior } from '../lib
 
 export type PageId = 'providers' | 'switch' | 'skills' | 'mcp' | 'sessions' | 'settings'
 
+/** 全屏「全局页」：与 Agent 无关，进入后隐藏侧边栏与切换器，仅保留返回按钮 */
+export const GLOBAL_PAGES: PageId[] = ['skills', 'mcp', 'sessions', 'settings']
+
 interface AppState {
   agent: AgentId
   page: PageId
+  /** 从全局页「返回」时回到的基础页（进入全局页前最近所在的基础页） */
+  returnPage: PageId
   theme: Theme
   closeBehavior: CloseBehavior
   /** 供应商官网映射（key: "agent/供应商名"），存本应用配置文件 */
@@ -127,6 +132,7 @@ function readLegacyWebsites(): Record<string, string> {
 export const useApp = create<AppState>((set, get) => ({
   agent: 'omp',
   page: 'providers',
+  returnPage: 'providers',
   theme: getStoredTheme(),
   closeBehavior: getCloseBehavior(),
   websites: {},
@@ -143,7 +149,12 @@ export const useApp = create<AppState>((set, get) => ({
   loading: false,
   error: null,
 
-  setPage: (page) => set({ page }),
+  setPage: (page) =>
+    set((state) => ({
+      page,
+      // 记录最近所在的基础页，供全局页「返回」回到原处（顶栏导航与侧边栏设置入口通用）
+      returnPage: GLOBAL_PAGES.includes(page) ? state.returnPage : page
+    })),
 
   setTheme: (theme) => {
     storeTheme(theme)

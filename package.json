@@ -1,6 +1,6 @@
 {
   "name": "omp-switch",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "面向 pi 与 omp（Oh My Pi）两个 CLI 编码 Agent 的可视化配置管理器",
   "main": "./out/main/index.js",
   "author": "ddz12123",
