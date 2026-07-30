@@ -15,7 +15,8 @@ import type {
   SkillsListResult,
   SkillsShSkill,
   SkillSyncMode,
-  SwitchState
+  SwitchState,
+  UpdaterEvent
 } from './types'
 
 /** 拉取远程模型列表的入参（来自供应商编辑表单，不落盘） */
@@ -101,4 +102,14 @@ export interface PreloadApi {
   onCloseRequested(callback: () => void): () => void
   /** 关闭确认结果：最小化到托盘 or 直接退出 */
   closeAction(action: 'minimize' | 'quit'): void
+  /** 当前应用版本号（package.json version） */
+  appVersion(): Promise<string>
+  /** 手动检查更新（开发环境仅回 dev 状态，不真正检查）；结果经 onUpdaterEvent 推送 */
+  checkForUpdates(): Promise<void>
+  /** 下载已发现的更新（autoDownload 关闭，需显式触发）；进度经 onUpdaterEvent 推送 */
+  downloadUpdate(): Promise<void>
+  /** 退出并安装已下载完成的更新 */
+  quitAndInstallUpdate(): Promise<void>
+  /** 订阅应用自更新状态事件，返回取消订阅函数 */
+  onUpdaterEvent(callback: (event: UpdaterEvent) => void): () => void
 }

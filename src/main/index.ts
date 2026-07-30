@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIpc } from './ipc'
 import { setupTray } from './tray'
+import { setupUpdater } from './updater'
 
 let mainWindow: BrowserWindow | null = null
 /** app.quit() 流程中（托盘退出/渲染层确认退出），放行窗口 close */
@@ -103,6 +104,9 @@ app.whenReady().then(() => {
   })
 
   registerIpc(refreshTray)
+
+  // 自更新接线：窗口用 getter 惰性获取（事件在 checkForUpdates 后才触发）
+  setupUpdater(() => mainWindow)
 
   createWindow()
 

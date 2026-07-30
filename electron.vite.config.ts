@@ -4,7 +4,14 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
-  main: {},
+  main: {
+    build: {
+      rollupOptions: {
+        // electron-updater 含动态 require，需外置由 node_modules 运行时解析（不打进 bundle）
+        external: ['electron-updater']
+      }
+    }
+  },
   preload: {},
   renderer: {
     resolve: {

@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { PreloadApi } from '../shared/api'
-import type { AgentId } from '../shared/types'
+import type { AgentId, UpdaterEvent } from '../shared/types'
 
 // 渲染进程可用的白名单 API，全部经 IPC 走主进程
 const api: PreloadApi = {
@@ -55,7 +55,16 @@ const api: PreloadApi = {
     ipcRenderer.on('close-requested', listener)
     return () => ipcRenderer.removeListener('close-requested', listener)
   },
-  closeAction: (action) => ipcRenderer.send('window:close-action', action)
+  closeAction: (action) => ipcRenderer.send('window:close-action', action),
+  appVersion: () => ipcRenderer.invoke('app:version'),
+  checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+  downloadUpdate: () => ipcRenderer.invoke('updater:download'),
+  quitAndInstallUpdate: () => ipcRenderer.invoke('updater:quit-install'),
+  onUpdaterEvent: (callback) => {
+    const listener = (_e: Electron.IpcRendererEvent, event: UpdaterEvent): void => callback(event)
+    ipcRenderer.on('updater:event', listener)
+    return () => ipcRenderer.removeListener('updater:event', listener)
+  }
 }
 
 if (process.contextIsolated) {

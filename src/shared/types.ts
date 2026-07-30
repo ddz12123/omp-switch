@@ -276,3 +276,34 @@ export const OMP_KNOWN_ROLES = [
   'advisor',
   'tiny'
 ] as const
+
+/**
+ * 应用自更新状态机（electron-updater 事件归一化）：
+ * - dev：开发环境不检查更新
+ * - checking：正在检查
+ * - available：发现新版本（autoDownload=false，未自动下载）
+ * - not-available：已是最新
+ * - downloading：下载中（带进度）
+ * - downloaded：下载完成，待重启安装
+ * - error：检查/下载出错
+ */
+export type UpdaterStatus =
+  | 'idle'
+  | 'dev'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+
+/** 主进程推送给渲染层的更新状态事件 */
+export interface UpdaterEvent {
+  status: UpdaterStatus
+  /** 新版本号（available / downloaded 时有） */
+  version?: string
+  /** 下载进度百分比 0-100（downloading 时有） */
+  percent?: number
+  /** 错误信息（error 时有） */
+  message?: string
+}

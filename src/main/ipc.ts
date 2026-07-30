@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import { dirname } from 'path'
@@ -44,6 +44,7 @@ import {
   resolveSessionRoots
 } from './sessions'
 import { readTextFile, writeTextFileSafe } from './lib/fileio'
+import { checkForUpdates, downloadUpdate, quitAndInstall } from './updater'
 
 /** 根据类别取原始配置文件路径 */
 function rawConfigPath(agentId: AgentId, kind: ConfigFileKind): string {
@@ -236,4 +237,10 @@ export function registerIpc(refreshTray: () => void): void {
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
   })
+
+  // ── 应用自更新 ──────────────────────────────────────────────
+  ipcMain.handle('app:version', () => app.getVersion())
+  ipcMain.handle('updater:check', () => checkForUpdates())
+  ipcMain.handle('updater:download', () => downloadUpdate())
+  ipcMain.handle('updater:quit-install', () => quitAndInstall())
 }

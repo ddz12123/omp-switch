@@ -1,6 +1,25 @@
 import { useEffect, useCallback, useState } from 'react'
-import { FolderOpen, FolderPen, GripVertical, Monitor, Moon, Plus, Sun, Trash2 } from 'lucide-react'
-import type { AgentId, SessionRootInfo, SkillSyncMode } from '@shared/types'
+import {
+  AlertCircle,
+  CheckCircle2,
+  Download,
+  ExternalLink,
+  FolderOpen,
+  FolderPen,
+  Github,
+  GripVertical,
+  Info,
+  Loader2,
+  Monitor,
+  Moon,
+  Plus,
+  RefreshCw,
+  RotateCw,
+  Sparkles,
+  Sun,
+  Trash2
+} from 'lucide-react'
+import type { AgentId, SessionRootInfo, SkillSyncMode, UpdaterEvent } from '@shared/types'
 import type { Theme } from '../lib/theme'
 import type { CloseBehavior } from '../lib/closeBehavior'
 import { useApp } from '../stores/app'
@@ -18,6 +37,11 @@ import {
   SelectTrigger,
   SelectValue
 } from '../components/ui/select'
+import appIcon from '../assets/app-icon.png'
+
+/** 开源仓库地址（关于卡片的 GitHub / 更新日志入口） */
+const REPO_URL = 'https://github.com/ddz12123/omp-switch'
+const RELEASES_URL = `${REPO_URL}/releases`
 
 const THEME_OPTIONS: {
   value: Theme
@@ -55,6 +79,37 @@ function sessionRootBadge(root: SessionRootInfo): string {
       return '配置 · sessionDir'
     default:
       return '手动'
+  }
+}
+
+/** 自更新提示条的语气 */
+type BannerTone = 'info' | 'error' | 'muted'
+
+const BANNER_TONE: Record<BannerTone, string> = {
+  info: 'border-blue-500/25 bg-blue-500/10 text-blue-600 dark:text-blue-400',
+  error: 'border-destructive/30 bg-destructive/10 text-destructive',
+  muted: 'border-border bg-muted/40 text-muted-foreground'
+}
+
+/** 根据更新状态生成提示条内容；idle 时不显示提示条 */
+function updaterBanner(event: UpdaterEvent): { tone: BannerTone; text: string } | null {
+  switch (event.status) {
+    case 'checking':
+      return { tone: 'muted', text: '正在检查更新…' }
+    case 'available':
+      return { tone: 'info', text: `检测到新版本 v${event.version}` }
+    case 'not-available':
+      return { tone: 'muted', text: '已是最新版本' }
+    case 'downloading':
+      return { tone: 'info', text: `正在下载更新 ${event.percent ?? 0}%` }
+    case 'downloaded':
+      return { tone: 'info', text: `新版本 v${event.version} 已下载，重启后完成安装` }
+    case 'dev':
+      return { tone: 'muted', text: '当前为开发版本，暂不检查更新' }
+    case 'error':
+      return { tone: 'error', text: `检查失败：${event.message ?? '未知错误'}` }
+    default:
+      return null
   }
 }
 
@@ -110,6 +165,31 @@ export default function SettingsPage(): React.JSX.Element {
     await removeSessionCustomDir(path)
     await loadSessionRoots()
   }
+
+  // 应用版本号 + 自更新状态（版本号一次性获取，更新事件由主进程推送）
+  const [appVersion, setAppVersion] = useState('')
+  const [update, setUpdate] = useState<UpdaterEvent>({ status: 'idle' })
+  useEffect(() => {
+    void window.api
+      .appVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion(''))
+    return window.api.onUpdaterEvent(setUpdate)
+  }, [])
+
+  const updateBusy = update.status === 'checking' || update.status === 'downloading'
+  const handleCheckUpdate = (): void => {
+    setUpdate({ status: 'checking' })
+    void window.api.checkForUpdates()
+  }
+  const handleDownloadUpdate = (): void => {
+    setUpdate({ status: 'downloading', percent: 0 })
+    void window.api.downloadUpdate()
+  }
+  const handleInstallUpdate = (): void => {
+    void window.api.quitAndInstallUpdate()
+  }
+  const updateBanner = updaterBanner(update)
 
   // 拖拽排序：拖动中用本地预览顺序实时换位，松手才提交持久化
   const [dragging, setDragging] = useState<AgentId | null>(null)
@@ -442,6 +522,108 @@ export default function SettingsPage(): React.JSX.Element {
               <span className="text-muted-foreground font-mono">{status.switchPath}</span>
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      <Card className="gap-3">
+        <CardHeader>
+          <CardTitle>关于</CardTitle>
+          <CardDescription>查看版本信息与检查更新</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <img
+                src={appIcon}
+                alt="OMP Switch"
+                className="size-12 rounded-xl shadow-sm"
+                draggable={false}
+              />
+              <div className="flex flex-col gap-1.5">
+                <span className="text-base leading-none font-semibold">OMP Switch</span>
+                <Badge variant="secondary" className="w-fit font-normal">
+                  版本 v{appVersion || '…'}
+                </Badge>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                title="在浏览器中打开 GitHub 仓库"
+                onClick={() => void window.api.openExternal(REPO_URL)}
+              >
+                <Github />
+                GitHub
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                title="查看历史版本与更新日志"
+                onClick={() => void window.api.openExternal(RELEASES_URL)}
+              >
+                <ExternalLink />
+                更新日志
+              </Button>
+              {update.status === 'downloaded' ? (
+                <Button size="sm" onClick={handleInstallUpdate}>
+                  <RotateCw />
+                  重启并安装
+                </Button>
+              ) : update.status === 'available' ? (
+                <Button size="sm" onClick={handleDownloadUpdate}>
+                  <Download />
+                  更新到 v{update.version}
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={updateBusy}
+                  onClick={handleCheckUpdate}
+                >
+                  {updateBusy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                  {update.status === 'checking'
+                    ? '检查中…'
+                    : update.status === 'downloading'
+                      ? `下载中 ${update.percent ?? 0}%`
+                      : '检查更新'}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {updateBanner && (
+            <div
+              className={cn(
+                'flex flex-col gap-2 rounded-lg border px-3 py-2.5 text-sm',
+                BANNER_TONE[updateBanner.tone]
+              )}
+            >
+              <div className="flex items-center gap-2">
+                {update.status === 'error' ? (
+                  <AlertCircle className="size-4 shrink-0" />
+                ) : update.status === 'checking' || update.status === 'downloading' ? (
+                  <Loader2 className="size-4 shrink-0 animate-spin" />
+                ) : update.status === 'available' ? (
+                  <Sparkles className="size-4 shrink-0" />
+                ) : update.status === 'downloaded' || update.status === 'not-available' ? (
+                  <CheckCircle2 className="size-4 shrink-0" />
+                ) : (
+                  <Info className="size-4 shrink-0" />
+                )}
+                <span>{updateBanner.text}</span>
+              </div>
+              {update.status === 'downloading' && (
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-blue-500/20">
+                  <div
+                    className="h-full rounded-full bg-blue-500 transition-[width] duration-300"
+                    style={{ width: `${update.percent ?? 0}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

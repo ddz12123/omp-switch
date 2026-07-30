@@ -14,10 +14,14 @@ asarUnpack:
 win:
   executableName: omp-switch
 nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+  createStartMenuShortcut: true
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
