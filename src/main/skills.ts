@@ -465,7 +465,7 @@ export async function fetchRepoSkills(input: string, branch?: string): Promise<R
 
 /**
  * 安装选中的技能：下载仓库 zipball，把选中目录解压进中央仓库（同名覆盖），
- * 记录来源仓库，并自动同步到所有已检测安装的 Agent。返回安装的目录名。
+ * 记录来源仓库。安装只入库、不主动同步到任何 Agent，需用户在列表页手动开启。返回安装的目录名。
  */
 export async function installSkills(
   repo: string,
@@ -507,18 +507,7 @@ export async function installSkills(
     installed.push(dirName)
   }
   await writeMeta(storeDir, meta)
-  // 自动同步到已检测安装的 Agent，单个失败不阻塞安装结果
-  const mode = await getSyncMode()
-  for (const dirName of installed) {
-    for (const adapter of listAdapters()) {
-      if (!adapter.detect()) continue
-      try {
-        await syncSkill(storeDir, dirName, adapter, mode)
-      } catch {
-        // 忽略：技能已入库，同步可在列表页手动重试
-      }
-    }
-  }
+  // 安装只入库，不主动同步到任何 Agent；用户在「已安装」列表里按需手动开启同步
   return installed
 }
 

@@ -268,19 +268,22 @@ function RepoManagerView({ onBack }: { onBack: () => void }): React.JSX.Element 
 function SkillsShPanel({
   leading,
   installedDirs,
-  onInstalled
+  onInstalled,
+  installing,
+  setInstalling
 }: {
   /** 渲染在搜索行最前面的元素（来源切换分段） */
   leading: React.ReactNode
   installedDirs: Set<string>
   onInstalled: () => void
+  /** 正在安装的技能 key（页级共享，非 null 时全局锁定安装按钮） */
+  installing: string | null
+  setInstalling: React.Dispatch<React.SetStateAction<string | null>>
 }): React.JSX.Element {
   const [query, setQuery] = useState('')
   /** null 表示还没搜索过 */
   const [items, setItems] = useState<SkillsShSkill[] | null>(null)
   const [searching, setSearching] = useState(false)
-  /** 正在安装的 "source/skillId"，防止连点 */
-  const [installing, setInstalling] = useState<string | null>(null)
   const [uninstalling, setUninstalling] = useState<{ name: string; dir: string } | null>(null)
 
   // promise 链写法：setState 都在回调里，避免 effect 中同步 setState
@@ -318,7 +321,7 @@ function SkillsShPanel({
       const match = res.skills.find((s) => remoteDirName(res.repo, s.path) === item.skillId)
       if (!match) throw new Error(`在 ${item.source} 中未找到技能 ${item.skillId}`)
       await window.api.installSkills(res.repo, res.branch, [match.path])
-      toast.success('安装成功，已同步到检测到的 Agent')
+      toast.success('安装成功，去「已安装」里按需同步到各 Agent')
       onInstalled()
     } catch (error) {
       toast.error(`安装失败：${errorMessage(error)}`)
@@ -425,7 +428,11 @@ function SkillsShPanel({
                       卸载
                     </Button>
                   ) : (
-                    <Button size="sm" disabled={busy} onClick={() => void handleInstall(item)}>
+                    <Button
+                      size="sm"
+                      disabled={installing !== null}
+                      onClick={() => void handleInstall(item)}
+                    >
                       {busy ? <Loader2 className="animate-spin" /> : <Download />}
                       安装
                     </Button>
@@ -453,12 +460,17 @@ function SkillsShPanel({
 function BrowseTab({
   installedDirs,
   onInstalled,
-  onManageRepos
+  onManageRepos,
+  installing,
+  setInstalling
 }: {
   installedDirs: Set<string>
   onInstalled: () => void
   /** 进入仓库管理页面 */
   onManageRepos: () => void
+  /** 正在安装的技能 key（页级共享，非 null 时全局锁定安装按钮） */
+  installing: string | null
+  setInstalling: React.Dispatch<React.SetStateAction<string | null>>
 }): React.JSX.Element {
   const { skillsRepos } = useApp()
   /** 技能来源：自己添加的 GitHub 仓库 / skills.sh 公共注册表 */
@@ -467,8 +479,6 @@ function BrowseTab({
   const [loading, setLoading] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [repoFilter, setRepoFilter] = useState('all')
-  /** 正在安装的 "repo:path"，防止连点 */
-  const [installing, setInstalling] = useState<string | null>(null)
   /** 待卸载确认的卡片 */
   const [uninstalling, setUninstalling] = useState<{ name: string; dir: string } | null>(null)
 
@@ -507,7 +517,7 @@ function BrowseTab({
     setInstalling(key)
     try {
       await window.api.installSkills(repo, branch, [path])
-      toast.success('安装成功，已同步到检测到的 Agent')
+      toast.success('安装成功，去「已安装」里按需同步到各 Agent')
       onInstalled()
     } catch (error) {
       toast.error(`安装失败：${errorMessage(error)}`)
@@ -589,6 +599,8 @@ function BrowseTab({
         leading={sourceSwitcher}
         installedDirs={installedDirs}
         onInstalled={onInstalled}
+        installing={installing}
+        setInstalling={setInstalling}
       />
     )
   }
@@ -721,7 +733,7 @@ function BrowseTab({
                   ) : (
                     <Button
                       size="sm"
-                      disabled={busy}
+                      disabled={installing !== null}
                       onClick={() => void handleInstall(card.repo, card.branch, card.path)}
                     >
                       {busy ? <Loader2 className="animate-spin" /> : <Download />}
@@ -771,6 +783,8 @@ export default function SkillsPage(): React.JSX.Element {
   const [updating, setUpdating] = useState<string | null>(null)
   /** 手动刷新中（仅按钮转圈，不遮整列表） */
   const [refreshing, setRefreshing] = useState(false)
+  /** 正在安装的技能 key，提到页级：切 tab/来源不丢，且非 null 时全局锁定所有安装按钮 */
+  const [installing, setInstalling] = useState<string | null>(null)
 
   // promise 链写法：setState 都在回调里，避免 effect 中同步 setState
   const load = useCallback(
@@ -943,6 +957,8 @@ export default function SkillsPage(): React.JSX.Element {
           installedDirs={installedDirs}
           onInstalled={() => void load()}
           onManageRepos={() => setManagingRepos(true)}
+          installing={installing}
+          setInstalling={setInstalling}
         />
       )}
 
