@@ -52,19 +52,22 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 22
+          cache: pnpm
 
       - name: 安装依赖
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: 类型检查 + 构建 + 打包并发布到 Releases
         run: |
-          npm run build
-          npx electron-builder ${{ matrix.args }} --publish always
+          pnpm run build
+          pnpm exec electron-builder ${{ matrix.args }} --publish always
         env:
           # electron-builder 读取 GH_TOKEN 上传到 GitHub Releases
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

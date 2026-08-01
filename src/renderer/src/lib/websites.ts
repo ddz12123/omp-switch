@@ -1,7 +1,7 @@
 /**
  * 供应商官网地址。omp/pi 的 CLI 配置里没有这个字段，
  * 写进 models.yml 会污染 CLI 配置，所以存本应用配置文件
- * ~/.omp-switch/config.json 的 websites 字段，key 形如 "omp/YSAPI"。
+ * ~/.omp-switch/config.json 的 websites 字段，key 形如 "omp/<provider>"。
  * 本模块是 store 的薄封装，读写都走 store（store 负责落盘）。
  */
 

@@ -81,7 +81,10 @@ export default function ProvidersPage(): React.JSX.Element {
           </span>
         </h2>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => void window.api.showConfigInFolder(agent)}>
+          <Button
+            variant="outline"
+            onClick={() => void window.api.showConfigInFolder(agent, 'providers')}
+          >
             <FolderOpen />
             打开配置目录
           </Button>

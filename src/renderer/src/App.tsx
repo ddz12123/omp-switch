@@ -9,6 +9,8 @@ import { Toaster } from './components/ui/sonner'
 import CloseConfirmDialog from './components/CloseConfirmDialog'
 import ProvidersPage from './pages/ProvidersPage'
 import SwitchPage from './pages/SwitchPage'
+import ConfigPage from './pages/ConfigPage'
+import RulesPage from './pages/RulesPage'
 import SkillsPage from './pages/SkillsPage'
 import McpPage from './pages/McpPage'
 import SessionsPage from './pages/SessionsPage'
@@ -178,6 +180,8 @@ export default function App(): React.JSX.Element {
                 <div className="min-h-0 flex-1 overflow-y-auto pb-6">
                   {page === 'providers' && <ProvidersPage />}
                   {page === 'switch' && <SwitchPage />}
+                  {page === 'config' && <ConfigPage />}
+                  {page === 'rules' && <RulesPage />}
                 </div>
               </div>
             </main>

@@ -12,10 +12,17 @@ const api: PreloadApi = {
   writeSwitch: (agentId, state) => ipcRenderer.invoke('switch:write', agentId, state),
   fetchRemoteModels: (payload) => ipcRenderer.invoke('models:fetch-remote', payload),
   cliVersions: () => ipcRenderer.invoke('cli:versions'),
-  showConfigInFolder: (agentId) => ipcRenderer.invoke('config:show-in-folder', agentId),
+  showConfigInFolder: (agentId, kind) => ipcRenderer.invoke('config:show-in-folder', agentId, kind),
   readRawConfig: (agentId, kind) => ipcRenderer.invoke('config:read-raw', agentId, kind),
   writeRawConfig: (agentId, kind, content) =>
     ipcRenderer.invoke('config:write-raw', agentId, kind, content),
+  readRules: (agentId) => ipcRenderer.invoke('rules:list', agentId),
+  writeRules: (agentId, name, content) => ipcRenderer.invoke('rules:write', agentId, name, content),
+  showRuleInFolder: (agentId, name) => ipcRenderer.invoke('rules:show-in-folder', agentId, name),
+  readConfigFields: (agentId) => ipcRenderer.invoke('config-fields:read', agentId),
+  writeConfigFields: (agentId, updates, deletes) =>
+    ipcRenderer.invoke('config-fields:write', agentId, updates, deletes),
+  pickConfigFilePath: () => ipcRenderer.invoke('config-fields:pick-file'),
   readAppConfig: () => ipcRenderer.invoke('app-config:read'),
   writeAppConfig: (config) => ipcRenderer.invoke('app-config:write', config),
   showAppConfigInFolder: () => ipcRenderer.invoke('app-config:show-in-folder'),

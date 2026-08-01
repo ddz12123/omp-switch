@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Server, Settings } from 'lucide-react'
+import { ArrowLeftRight, ScrollText, Server, Settings, ToggleLeft } from 'lucide-react'
 import { useApp, type PageId } from '../stores/app'
 import { cn } from '../lib/utils'
 
@@ -10,7 +10,9 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'providers', label: '供应商', icon: Server },
-  { id: 'switch', label: '模型切换', icon: ArrowLeftRight }
+  { id: 'switch', label: '模型切换', icon: ArrowLeftRight },
+  { id: 'config', label: '全局配置', icon: ToggleLeft },
+  { id: 'rules', label: '全局规则', icon: ScrollText }
 ]
 
 const SETTINGS_ITEM: NavItem = { id: 'settings', label: '设置', icon: Settings }

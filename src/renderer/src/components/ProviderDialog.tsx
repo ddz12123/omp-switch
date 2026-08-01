@@ -360,7 +360,7 @@ export default function ProviderDialog({
                 ref={nameRef}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="如 YSAPI"
+                placeholder="如 openai"
               />
             </div>
             <div className="grid gap-1.5">

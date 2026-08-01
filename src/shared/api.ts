@@ -10,6 +10,8 @@ import type {
   ProviderMap,
   RawConfigFile,
   RemoteSkillsResult,
+  ConfigFieldsResult,
+  RuleFileInfo,
   SessionMeta,
   SessionRaw,
   SessionRootInfo,
@@ -38,11 +40,31 @@ export interface PreloadApi {
   fetchRemoteModels(payload: FetchRemoteModelsPayload): Promise<string[]>
   /** 检测 pi / omp 命令行的当前版本与 npm 最新版本（本地环境检查） */
   cliVersions(): Promise<CliVersionInfo[]>
-  showConfigInFolder(agentId: AgentId): Promise<void>
+  /** 在资源管理器中显示指定配置文件；文件不存在时打开其所在目录 */
+  showConfigInFolder(agentId: AgentId, kind: ConfigFileKind): Promise<void>
   /** 读取原始配置文件文本（供 Monaco 编辑器直接编辑），文件不存在时 content 为空串 */
   readRawConfig(agentId: AgentId, kind: ConfigFileKind): Promise<RawConfigFile>
   /** 覆写原始配置文件，主进程会先做 YAML/JSON 语法校验，失败抛错不落盘 */
   writeRawConfig(agentId: AgentId, kind: ConfigFileKind, content: string): Promise<void>
+  /** 读取某 Agent 的全局规则文件列表（含内容，不存在时 content 为空串），多 Agent 由适配器声明 */
+  readRules(agentId: AgentId): Promise<RuleFileInfo[]>
+  /** 覆写某 Agent 的规则文件（按文件名定位），自动 .bak 备份，不存在则创建 */
+  writeRules(agentId: AgentId, name: string, content: string): Promise<void>
+  /** 在资源管理器中显示某规则文件（不存在时打开其所在目录） */
+  showRuleInFolder(agentId: AgentId, name: string): Promise<void>
+  /** 读取全局配置可视化的字段清单与当前值（只含 schema 覆盖的字段） */
+  readConfigFields(agentId: AgentId): Promise<ConfigFieldsResult>
+  /**
+   * 提交配置修改：updates 为要写入的值；deletes 为要从配置中删除的字段路径。
+   * 删除与写入分开传递，避免 undefined 值经 IPC 序列化丢失。
+   */
+  writeConfigFields(
+    agentId: AgentId,
+    updates: Record<string, unknown>,
+    deletes: string[]
+  ): Promise<void>
+  /** 弹系统文件选择框，选中返回绝对路径，取消返回 null（供 path 类型字段使用） */
+  pickConfigFilePath(): Promise<string | null>
   /** 读取本应用配置（默认 ~/.omp-switch/config.json，可自定义目录）及其路径 */
   readAppConfig(): Promise<AppConfigResult>
   /** 整体覆写本应用配置 */

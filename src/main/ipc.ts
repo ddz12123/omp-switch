@@ -9,6 +9,7 @@ import type {
   ConfigFileKind,
   McpServerConfig,
   ProviderMap,
+  RuleFileInfo,
   SkillSyncMode,
   SwitchState
 } from '../shared/types'
@@ -90,14 +91,78 @@ export function registerIpc(refreshTray: () => void): void {
     refreshTray()
   })
 
+  ipcMain.handle('rules:list', async (_e, agentId: AgentId) => {
+    const adapter = getAdapter(agentId)
+    const files: RuleFileInfo[] = []
+    for (const spec of adapter.ruleFiles) {
+      const content = (await readTextFile(spec.path)) ?? ''
+      files.push({ ...spec, exists: existsSync(spec.path), content })
+    }
+    return files
+  })
+
+  ipcMain.handle('rules:write', async (_e, agentId: AgentId, name: string, content: string) => {
+    const adapter = getAdapter(agentId)
+    const spec = adapter.ruleFiles.find((f) => f.name === name)
+    if (!spec) throw new Error(`未知规则文件: ${name}`)
+    await writeTextFileSafe(spec.path, content)
+    refreshTray()
+  })
+
+  ipcMain.handle('rules:show-in-folder', (_e, agentId: AgentId, name: string) => {
+    const adapter = getAdapter(agentId)
+    const spec = adapter.ruleFiles.find((f) => f.name === name)
+    if (!spec) throw new Error(`未知规则文件: ${name}`)
+    if (existsSync(spec.path)) shell.showItemInFolder(spec.path)
+    else void shell.openPath(dirname(spec.path))
+  })
+
+  ipcMain.handle('config-fields:read', async (_e, agentId: AgentId) => {
+    const adapter = getAdapter(agentId)
+    return {
+      path: adapter.switchPath,
+      schema: adapter.configSchema,
+      values: await adapter.readConfigValues()
+    }
+  })
+
+  ipcMain.handle(
+    'config-fields:write',
+    async (_e, agentId: AgentId, updates: Record<string, unknown>, deletes: string[]) => {
+      const adapter = getAdapter(agentId)
+      // 只允许 schema 声明的字段：保证未知字段原样保留
+      const knownKeys = new Set(adapter.configSchema.flatMap((g) => g.fields).map((f) => f.key))
+      for (const key of [...Object.keys(updates ?? {}), ...(deletes ?? [])]) {
+        if (!knownKeys.has(key)) throw new Error(`未知配置项: ${key}`)
+      }
+      await adapter.writeConfigValues(updates ?? {}, deletes ?? [])
+      refreshTray()
+    }
+  )
+
+  ipcMain.handle('config-fields:pick-file', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: '选择文件',
+      properties: ['openFile']
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+
   ipcMain.handle('models:fetch-remote', (_e, payload: FetchRemoteModelsPayload) =>
     fetchRemoteModels(payload)
   )
 
   ipcMain.handle('cli:versions', () => getCliVersions())
 
-  ipcMain.handle('config:show-in-folder', (_e, agentId: AgentId) => {
-    shell.showItemInFolder(getAdapter(agentId).providersPath)
+  ipcMain.handle('config:show-in-folder', async (_e, agentId: AgentId, kind: ConfigFileKind) => {
+    const path = rawConfigPath(agentId, kind)
+    await mkdir(dirname(path), { recursive: true })
+    if (existsSync(path)) shell.showItemInFolder(path)
+    else await shell.openPath(dirname(path))
   })
 
   ipcMain.handle('config:read-raw', async (_e, agentId: AgentId, kind: ConfigFileKind) => {

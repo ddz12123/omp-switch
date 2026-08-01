@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { FileCode, Plus, Trash2 } from 'lucide-react'
+import { FileCode, FolderOpen, Plus, Trash2 } from 'lucide-react'
 import { EFFORT_LEVELS, OMP_KNOWN_ROLES, type RoleAssignment } from '@shared/types'
 import { modelKey, parseModelRef } from '@shared/modelRef'
 import { useApp } from '../stores/app'
@@ -203,6 +203,13 @@ export default function SwitchPage(): React.JSX.Element {
           </span>
         </h2>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => void window.api.showConfigInFolder(agent, 'switch')}
+          >
+            <FolderOpen />
+            打开配置目录
+          </Button>
           <Button variant="outline" onClick={() => setRawOpen(true)}>
             <FileCode />
             编辑配置文件

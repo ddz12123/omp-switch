@@ -1,9 +1,10 @@
 import { existsSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
-import type { ProviderMap, SwitchState } from '../../shared/types'
+import type { ProviderMap, RuleFileSpec, SwitchState } from '../../shared/types'
 import { readTextFile, writeTextFileSafe } from '../lib/fileio'
 import { isPlainObject, type AgentAdapter } from './types'
+import { getByPath, PI_CONFIG_SCHEMA } from './configSchema'
 
 /**
  * pi 适配器：
@@ -19,6 +20,15 @@ export class PiAdapter implements AgentAdapter {
   readonly switchPath = join(homedir(), '.pi', 'agent', 'settings.json')
   readonly skillsDir = join(homedir(), '.pi', 'agent', 'skills')
   readonly mcpPath = join(homedir(), '.pi', 'agent', 'mcp.json')
+  /** pi 的全局规则：只有 AGENTS.md（开场注入上下文） */
+  readonly ruleFiles: RuleFileSpec[] = [
+    {
+      name: 'AGENTS.md',
+      path: join(homedir(), '.pi', 'agent', 'AGENTS.md'),
+      kind: 'context'
+    }
+  ]
+  readonly configSchema = PI_CONFIG_SCHEMA
 
   detect(): boolean {
     return existsSync(this.providersPath) || existsSync(this.switchPath)
@@ -66,6 +76,26 @@ export class PiAdapter implements AgentAdapter {
       settings.defaultThinkingLevel = assignment.effort
     } else {
       delete settings.defaultThinkingLevel
+    }
+    await writeTextFileSafe(this.switchPath, JSON.stringify(settings, null, 2) + '\n')
+  }
+
+  async readConfigValues(): Promise<Record<string, unknown>> {
+    const root = await this.readJson(this.switchPath)
+    const values: Record<string, unknown> = {}
+    for (const field of this.configSchema.flatMap((g) => g.fields)) {
+      values[field.key] = getByPath(root, field.key)
+    }
+    return values
+  }
+
+  async writeConfigValues(updates: Record<string, unknown>, deletes: string[]): Promise<void> {
+    const settings = await this.readJson(this.switchPath)
+    for (const [key, value] of Object.entries(updates)) {
+      settings[key] = value
+    }
+    for (const key of deletes) {
+      delete settings[key]
     }
     await writeTextFileSafe(this.switchPath, JSON.stringify(settings, null, 2) + '\n')
   }

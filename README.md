@@ -29,7 +29,7 @@
 
 ## 🖥️ 环境要求
 
-- **Node.js** ≥ 18，npm ≥ 9
+- **Node.js** ≥ 22.13，pnpm 11
 - **操作系统**：Windows / macOS / Linux
 - 需要另行安装你要管理的 CLI：[pi](https://pi.dev/docs) 和/或 [omp](https://omp.sh)。
   本应用只读写它们的配置文件，不会替你安装 CLI。
@@ -42,23 +42,23 @@ git clone https://github.com/ddz12123/omp-switch.git
 cd omp-switch
 
 # 安装依赖
-npm install
+pnpm install --frozen-lockfile
 
 # 启动开发环境
-npm run dev
+pnpm run dev
 ```
 
 ## 📦 构建打包
 
 ```bash
 # Windows
-npm run build:win
+pnpm run build:win
 
 # macOS
-npm run build:mac
+pnpm run build:mac
 
 # Linux
-npm run build:linux
+pnpm run build:linux
 ```
 
 产物输出到 `dist/`。打包相关配置见 [`electron-builder.yml`](./electron-builder.yml)。
@@ -67,11 +67,11 @@ npm run build:linux
 
 | 命令 | 说明 |
 | --- | --- |
-| `npm run dev` | 启动 electron-vite 开发模式（热重载） |
-| `npm run lint` | ESLint 检查 |
-| `npm run typecheck` | 类型检查（主进程 + 渲染进程） |
-| `npm run format` | Prettier 格式化 |
-| `npm run build` | 类型检查 + 构建 |
+| `pnpm run dev` | 启动 electron-vite 开发模式（热重载） |
+| `pnpm run lint` | ESLint 检查 |
+| `pnpm run typecheck` | 类型检查（主进程 + 渲染进程） |
+| `pnpm run format` | Prettier 格式化 |
+| `pnpm run build` | 类型检查 + 构建 |
 
 ## 🧩 技术栈
 
@@ -109,8 +109,8 @@ src/
 欢迎提交 Issue 与 Pull Request。提交前请确保通过：
 
 ```bash
-npm run lint
-npm run typecheck
+pnpm run lint
+pnpm run typecheck
 ```
 
 ## 📄 许可证

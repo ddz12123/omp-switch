@@ -2,10 +2,11 @@ import { existsSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { parseDocument, Document } from 'yaml'
-import type { ProviderMap, SwitchState } from '../../shared/types'
+import type { ProviderMap, RuleFileSpec, SwitchState } from '../../shared/types'
 import { formatModelRef, parseModelRef } from '../../shared/modelRef'
 import { readTextFile, writeTextFileSafe } from '../lib/fileio'
 import { isPlainObject, type AgentAdapter } from './types'
+import { getByPath, OMP_CONFIG_SCHEMA } from './configSchema'
 
 /**
  * omp (Oh My Pi) 适配器：
@@ -21,6 +22,20 @@ export class OmpAdapter implements AgentAdapter {
   readonly switchPath = join(homedir(), '.omp', 'agent', 'config.yml')
   readonly skillsDir = join(homedir(), '.omp', 'agent', 'skills')
   readonly mcpPath = join(homedir(), '.omp', 'agent', 'mcp.json')
+  /** omp 的全局规则：AGENTS.md 开场注入 + RULES.md sticky 始终生效 */
+  readonly ruleFiles: RuleFileSpec[] = [
+    {
+      name: 'AGENTS.md',
+      path: join(homedir(), '.omp', 'agent', 'AGENTS.md'),
+      kind: 'context'
+    },
+    {
+      name: 'RULES.md',
+      path: join(homedir(), '.omp', 'agent', 'RULES.md'),
+      kind: 'sticky'
+    }
+  ]
+  readonly configSchema = OMP_CONFIG_SCHEMA
 
   detect(): boolean {
     return existsSync(this.providersPath) || existsSync(this.switchPath)
@@ -70,6 +85,29 @@ export class OmpAdapter implements AgentAdapter {
       modelRoles[role] = formatModelRef(assignment)
     }
     doc.setIn(['modelRoles'], doc.createNode(modelRoles))
+    await writeTextFileSafe(this.switchPath, doc.toString())
+  }
+
+  async readConfigValues(): Promise<Record<string, unknown>> {
+    const doc = await this.readDocument(this.switchPath)
+    const root = doc.toJS()
+    const values: Record<string, unknown> = {}
+    for (const field of this.configSchema.flatMap((g) => g.fields)) {
+      values[field.key] = getByPath(isPlainObject(root) ? root : {}, field.key)
+    }
+    return values
+  }
+
+  async writeConfigValues(updates: Record<string, unknown>, deletes: string[]): Promise<void> {
+    const doc = await this.readDocument(this.switchPath)
+    for (const [key, value] of Object.entries(updates)) {
+      doc.setIn(key.split('.'), doc.createNode(value))
+    }
+    for (const key of deletes) {
+      const path = key.split('.')
+      // 路径不存在时 deleteIn 会抛错，先检查（用户可把未设置的字段选回「未设置」）
+      if (doc.hasIn(path)) doc.deleteIn(path)
+    }
     await writeTextFileSafe(this.switchPath, doc.toString())
   }
 }

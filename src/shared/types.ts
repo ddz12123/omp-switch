@@ -99,6 +99,64 @@ export interface RawConfigFile {
   content: string
 }
 
+/** 全局规则文件的类别：context = 开场注入上下文；sticky = 始终生效（长会话也保留） */
+export type RuleFileKind = 'context' | 'sticky'
+
+/** 适配器声明的规则文件（静态部分） */
+export interface RuleFileSpec {
+  /** 文件名（AGENTS.md / RULES.md），也是写入时的定位键 */
+  name: string
+  /** 绝对路径 */
+  path: string
+  kind: RuleFileKind
+}
+
+/** 规则文件读取结果（含运行时状态） */
+export interface RuleFileInfo extends RuleFileSpec {
+  /** 文件当前是否存在 */
+  exists: boolean
+  /** 文件内容，不存在时为空串 */
+  content: string
+}
+
+/** 配置字段类型：驱动表单渲染 */
+export type ConfigFieldType =
+  'string' | 'number' | 'boolean' | 'select' | 'secret' | 'array' | 'path'
+
+/** 单个配置字段声明（schema 驱动，新增字段只改数据） */
+export interface ConfigFieldDef {
+  /** 配置键，支持点路径（如 tools.approvalMode） */
+  key: string
+  type: ConfigFieldType
+  /** 展示名 */
+  label: string
+  /** 说明文案 */
+  desc?: string
+  /** select 类型可选项 */
+  options?: string[]
+  /** select 类型是否允许输入 options 之外的自定义值 */
+  allowCustom?: boolean
+  /** 空值时占位提示 */
+  placeholder?: string
+  /** 依赖的父字段 key：父字段为 true 时才允许配置（如 shellPath 依赖 bash.enabled） */
+  enabledWhen?: string
+}
+
+/** 配置字段分组 */
+export interface ConfigFieldGroup {
+  id: string
+  label: string
+  desc?: string
+  fields: ConfigFieldDef[]
+}
+
+/** 配置字段读取结果：文件路径 + 字段清单 + 当前值（按 key） */
+export interface ConfigFieldsResult {
+  path: string
+  schema: ConfigFieldGroup[]
+  values: Record<string, unknown>
+}
+
 /** Skills 同步方式：软链接（省空间、实时同步）/ 文件复制（兼容性最好） */
 export type SkillSyncMode = 'symlink' | 'copy'
 
