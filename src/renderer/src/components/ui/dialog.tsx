@@ -56,7 +56,7 @@ function DialogContent({
           // 全屏类放最后，覆盖调用方传入的尺寸/圆角等样式；
           // transition-none 取消 200ms 过渡，避免「宽度瞬变、高度慢变」的闪烁
           fullscreen &&
-            'transition-none top-0 left-0 h-dvh w-full max-w-none translate-x-0 translate-y-0 rounded-none sm:max-w-none'
+            'transition-none top-0 left-0 h-dvh max-h-dvh min-h-none w-full max-w-none translate-x-0 translate-y-0 rounded-none sm:max-w-none'
         )}
         {...props}
       >
