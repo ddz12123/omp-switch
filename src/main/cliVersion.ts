@@ -1,9 +1,6 @@
-import { exec } from 'child_process'
-import { promisify } from 'util'
+import { exec, spawn } from 'child_process'
 import type { AgentId, CliVersionInfo } from '../shared/types'
 import { listAdapters } from './agents'
-
-const execAsync = promisify(exec)
 
 const NPM_REGISTRY = 'https://registry.npmjs.org'
 /** 执行 <cli> --version 的超时（CLI 冷启动可能较慢） */
@@ -60,14 +57,59 @@ function compareVersions(a: string, b: string): number {
   return 0
 }
 
-/** 执行 <cli> --version 取当前本地版本；未安装/不在 PATH 时抛错 */
-async function getCurrentVersion(command: string): Promise<string> {
-  const { stdout, stderr } = await execAsync(command, {
-    timeout: VERSION_TIMEOUT_MS,
-    windowsHide: true
+/**
+ * Windows：exec 超时只会 TerminateProcess cmd.exe，CLI 孙进程（node.exe，经 npm .cmd shim 拉起）
+ * 可能残留。重试前先用 taskkill 清掉进程树，避免新旧实例并行抢冷启动资源；进程已退出时静默。
+ */
+function killProcessTree(pid: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+    windowsHide: true,
+    stdio: 'ignore'
   })
-  // 部分 CLI 把版本号打到 stderr，两路都扫
-  return parseVersion(`${stdout}\n${stderr}`)
+  killer.on('close', resolve)
+  killer.on('error', resolve)
+  return promise
+}
+
+/**
+ * 执行 <cli> --version 取当前本地版本；未安装/不在 PATH 时抛错。
+ * 首次失败会重试一次：CLI 冷启动（首次加载依赖、杀软扫描、刚开机）可能超过单次超时，
+ * 重试时通常已「热」起来，避免把偶发的慢启动误判成「未安装」。
+ * 用 exec 原始形式拿子进程句柄，超时后能按 PID 清进程树（见 killProcessTree）。
+ */
+async function getCurrentVersion(command: string): Promise<string> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const child = exec(command, { timeout: VERSION_TIMEOUT_MS, windowsHide: true })
+    try {
+      const { promise, resolve, reject } = Promise.withResolvers<{
+        stdout: string
+        stderr: string
+      }>()
+      let stdout = ''
+      let stderr = ''
+      child.stdout?.on('data', (chunk) => (stdout += chunk))
+      child.stderr?.on('data', (chunk) => (stderr += chunk))
+      child.on('error', reject)
+      child.on('close', (code, signal) => {
+        if (code === 0 && signal === null) resolve({ stdout, stderr })
+        else reject(new Error(`命令退出：${code ?? signal ?? '未知原因'}`))
+      })
+      await promise
+      // 部分 CLI 把版本号打到 stderr，两路都扫
+      const version = parseVersion(`${stdout}\n${stderr}`)
+      if (version) return version
+      lastError = new Error('命令执行成功但没有输出版本号')
+    } catch (error) {
+      lastError = error
+      // 首次失败后清掉可能残留的 CLI 进程树再重试（仅 Windows，taskkill 找不到进程时静默）
+      if (attempt === 0 && child.pid && process.platform === 'win32') {
+        await killProcessTree(child.pid)
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
 }
 
 /** 拉取 npm registry 上某个包的最新版本号 */
