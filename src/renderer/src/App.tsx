@@ -43,6 +43,11 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     void init()
+    // 应用更新：启动默认检查一次；事件推送落 store（首页角标 / 设置页关于共用）
+    const unsubscribeUpdater = window.api.onUpdaterEvent((event) =>
+      useApp.getState().setUpdaterEvent(event)
+    )
+    useApp.getState().checkUpdate()
     // 托盘侧改了配置 → 当前 Agent 数据重新拉取
     const unsubscribe = window.api.onStateChanged((changedAgent) => {
       if (changedAgent === useApp.getState().agent) void useApp.getState().reload()
@@ -60,6 +65,7 @@ export default function App(): React.JSX.Element {
     const onFocus = (): void => void useApp.getState().reload()
     window.addEventListener('focus', onFocus)
     return () => {
+      unsubscribeUpdater()
       unsubscribe()
       unsubscribeClose()
       window.removeEventListener('focus', onFocus)

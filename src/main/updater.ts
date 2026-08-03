@@ -56,8 +56,12 @@ export async function checkForUpdates(): Promise<void> {
   }
 }
 
-/** 下载已发现的更新。 */
+/** 下载已发现的更新；开发环境未真正检查过更新，直接回错误（autoUpdater 会抛 "Please check update first"） */
 export async function downloadUpdate(): Promise<void> {
+  if (!app.isPackaged) {
+    emit({ status: 'error', message: '开发模式不支持下载更新' })
+    return
+  }
   try {
     await autoUpdater.downloadUpdate()
   } catch (err) {

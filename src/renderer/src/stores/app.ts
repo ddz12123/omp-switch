@@ -7,7 +7,8 @@ import type {
   ProviderMap,
   SkillRepo,
   SkillSyncMode,
-  SwitchState
+  SwitchState,
+  UpdaterEvent
 } from '@shared/types'
 import { AGENT_IDS } from '@shared/types'
 import { applyTheme, getStoredTheme, storeTheme, type Theme } from '../lib/theme'
@@ -45,6 +46,8 @@ interface AppState {
   statuses: AgentStatus[]
   providers: ProviderMap
   switchState: SwitchState
+  /** 应用自更新状态（主进程事件推送，首页角标 / 设置页关于共用一份） */
+  updater: UpdaterEvent
   loading: boolean
   error: string | null
 
@@ -52,6 +55,14 @@ interface AppState {
   setAgent: (agent: AgentId) => void
   setTheme: (theme: Theme) => void
   setCloseBehavior: (value: CloseBehavior) => void
+  /** 主进程推送的更新事件 → 落 store（先置 checking/downloading 再调 IPC，防事件间隙丢状态） */
+  setUpdaterEvent: (event: UpdaterEvent) => void
+  /** 检查应用更新（启动默认触发一次；设置页「关于」进入时也会触发） */
+  checkUpdate: () => void
+  /** 下载已发现的更新 */
+  downloadUpdate: () => void
+  /** 退出并安装已下载完成的更新 */
+  installUpdate: () => void
   updateWebsites: (websites: Record<string, string>) => void
   /** 弹目录选择框，把配置迁移到用户选的目录 */
   changeAppConfigDir: () => Promise<void>
@@ -147,6 +158,7 @@ export const useApp = create<AppState>((set, get) => ({
   statuses: [],
   providers: {},
   switchState: { roles: {} },
+  updater: { status: 'idle' },
   loading: false,
   error: null,
 
@@ -168,6 +180,22 @@ export const useApp = create<AppState>((set, get) => ({
     storeCloseBehavior(value)
     set({ closeBehavior: value })
     persistAppConfig()
+  },
+
+  setUpdaterEvent: (event) => set({ updater: event }),
+
+  checkUpdate: () => {
+    set({ updater: { status: 'checking' } })
+    void window.api.checkForUpdates()
+  },
+
+  downloadUpdate: () => {
+    set({ updater: { status: 'downloading', percent: 0 } })
+    void window.api.downloadUpdate()
+  },
+
+  installUpdate: () => {
+    void window.api.quitAndInstallUpdate()
   },
 
   updateWebsites: (websites) => {

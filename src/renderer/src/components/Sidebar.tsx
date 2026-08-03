@@ -1,5 +1,6 @@
 import { ArrowLeftRight, ScrollText, Server, Settings, ToggleLeft } from 'lucide-react'
 import { useApp, type PageId } from '../stores/app'
+import UpdateIndicator from './UpdateIndicator'
 import { cn } from '../lib/utils'
 
 interface NavItem {
@@ -20,31 +21,35 @@ const SETTINGS_ITEM: NavItem = { id: 'settings', label: '设置', icon: Settings
 export function Sidebar(): React.JSX.Element {
   const { page, setPage } = useApp()
 
-  const renderItem = (item: NavItem): React.JSX.Element => (
-    <button
-      key={item.id}
-      onClick={() => setPage(item.id)}
-      className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200 [transition-timing-function:var(--ease-fluid)]',
-        page === item.id
-          ? 'bg-card text-foreground shadow-sm ring-1 ring-black/[0.04] dark:ring-white/[0.06] font-medium'
-          : 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground'
-      )}
-    >
-      <item.icon
-        className={cn(
-          'size-4 transition-colors duration-200',
-          page === item.id ? 'text-foreground' : 'text-muted-foreground/70'
-        )}
-      />
-      {item.label}
-    </button>
+  const itemCls = (id: PageId): string =>
+    cn(
+      'flex min-w-0 flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200 [transition-timing-function:var(--ease-fluid)]',
+      page === id
+        ? 'bg-card text-foreground shadow-sm ring-1 ring-black/[0.04] dark:ring-white/[0.06] font-medium'
+        : 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground'
+    )
+
+  const iconCls = (id: PageId): string =>
+    cn(
+      'size-4 shrink-0 transition-colors duration-200',
+      page === id ? 'text-foreground' : 'text-muted-foreground/70'
+    )
+
+  const renderItem = (item: NavItem, trailing?: React.ReactNode): React.JSX.Element => (
+    <div key={item.id} className="flex min-w-0 items-center gap-1.5">
+      <button onClick={() => setPage(item.id)} className={itemCls(item.id)}>
+        <item.icon className={iconCls(item.id)} />
+        {item.label}
+      </button>
+      {trailing}
+    </div>
   )
 
   return (
     <aside className="flex w-48 shrink-0 flex-col gap-1 p-3">
-      {NAV_ITEMS.map(renderItem)}
-      <div className="mt-auto">{renderItem(SETTINGS_ITEM)}</div>
+      {NAV_ITEMS.map((item) => renderItem(item))}
+      {/* 更新角标挂在左下角「设置」旁（全局页隐藏侧边栏，设置页内有自己的更新卡片） */}
+      <div className="mt-auto">{renderItem(SETTINGS_ITEM, <UpdateIndicator />)}</div>
     </aside>
   )
 }

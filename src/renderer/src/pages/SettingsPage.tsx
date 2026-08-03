@@ -188,7 +188,11 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
     setSkillsSyncMode,
     changeSkillsDir,
     addSessionCustomDir,
-    removeSessionCustomDir
+    removeSessionCustomDir,
+    updater,
+    checkUpdate,
+    downloadUpdate,
+    installUpdate
   } = useApp()
 
   // MCP 中央库路径异步获取（仅设置页展示）
@@ -223,30 +227,17 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
     await loadSessionRoots()
   }
 
-  // 应用版本号 + 自更新状态（版本号一次性获取，更新事件由主进程推送）
+  // 应用版本号一次性获取；自更新状态与首页角标共用 store（主进程事件推送，双端同步）
   const [appVersion, setAppVersion] = useState('')
-  const [update, setUpdate] = useState<UpdaterEvent>({ status: 'idle' })
   useEffect(() => {
     void window.api
       .appVersion()
       .then(setAppVersion)
       .catch(() => setAppVersion(''))
-    return window.api.onUpdaterEvent(setUpdate)
   }, [])
 
-  const updateBusy = update.status === 'checking' || update.status === 'downloading'
-  const handleCheckUpdate = (): void => {
-    setUpdate({ status: 'checking' })
-    void window.api.checkForUpdates()
-  }
-  const handleDownloadUpdate = (): void => {
-    setUpdate({ status: 'downloading', percent: 0 })
-    void window.api.downloadUpdate()
-  }
-  const handleInstallUpdate = (): void => {
-    void window.api.quitAndInstallUpdate()
-  }
-  const updateBanner = updaterBanner(update)
+  const updateBusy = updater.status === 'checking' || updater.status === 'downloading'
+  const updateBanner = updaterBanner(updater)
 
   // 拖拽排序：拖动中用本地预览顺序实时换位，松手才提交持久化
   const [dragging, setDragging] = useState<AgentId | null>(null)
@@ -289,8 +280,12 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
   }, [])
   const handleTabChange = (tab: SettingsTab): void => {
     setActiveTab(tab)
-    // 首次切到关于（含环境检查）才触发检测，之后靠「刷新」按钮手动重查
+    // 首次切到关于（含环境检查）才触发 CLI 检测，之后靠「刷新」按钮手动重查
     if (tab === 'about' && !cliLoaded) void loadCliVersions()
+    // 进入关于页自动检查一次应用更新（仅尚未检查过/上次失败时；已有结果不重复触发，避免闪烁）
+    if (tab === 'about' && (updater.status === 'idle' || updater.status === 'error')) {
+      checkUpdate()
+    }
   }
 
   // 命令对话框：install 模式展示所有 CLI 的安装命令；upgrade 模式展示指定 CLI 的升级命令
@@ -777,28 +772,28 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
                       <ExternalLink />
                       更新日志
                     </Button>
-                    {update.status === 'downloaded' ? (
-                      <Button size="sm" onClick={handleInstallUpdate}>
+                    {updater.status === 'downloaded' ? (
+                      <Button size="sm" onClick={installUpdate}>
                         <RotateCw />
                         重启并安装
                       </Button>
-                    ) : update.status === 'available' ? (
-                      <Button size="sm" onClick={handleDownloadUpdate}>
+                    ) : updater.status === 'available' ? (
+                      <Button size="sm" onClick={downloadUpdate}>
                         <Download />
-                        更新到 v{update.version}
+                        更新到 v{updater.version}
                       </Button>
                     ) : (
                       <Button
                         variant="outline"
                         size="sm"
                         disabled={updateBusy}
-                        onClick={handleCheckUpdate}
+                        onClick={checkUpdate}
                       >
                         {updateBusy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-                        {update.status === 'checking'
+                        {updater.status === 'checking'
                           ? '检查中…'
-                          : update.status === 'downloading'
-                            ? `下载中 ${update.percent ?? 0}%`
+                          : updater.status === 'downloading'
+                            ? `下载中 ${updater.percent ?? 0}%`
                             : '检查更新'}
                       </Button>
                     )}
@@ -813,24 +808,24 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
                     )}
                   >
                     <div className="flex items-center gap-2">
-                      {update.status === 'error' ? (
+                      {updater.status === 'error' ? (
                         <AlertCircle className="size-4 shrink-0" />
-                      ) : update.status === 'checking' || update.status === 'downloading' ? (
+                      ) : updater.status === 'checking' || updater.status === 'downloading' ? (
                         <Loader2 className="size-4 shrink-0 animate-spin" />
-                      ) : update.status === 'available' ? (
+                      ) : updater.status === 'available' ? (
                         <Sparkles className="size-4 shrink-0" />
-                      ) : update.status === 'downloaded' || update.status === 'not-available' ? (
+                      ) : updater.status === 'downloaded' || updater.status === 'not-available' ? (
                         <CheckCircle2 className="size-4 shrink-0" />
                       ) : (
                         <Info className="size-4 shrink-0" />
                       )}
                       <span>{updateBanner.text}</span>
                     </div>
-                    {update.status === 'downloading' && (
+                    {updater.status === 'downloading' && (
                       <div className="h-1.5 w-full overflow-hidden rounded-full bg-blue-500/20">
                         <div
                           className="h-full rounded-full bg-blue-500 transition-[width] duration-300"
-                          style={{ width: `${update.percent ?? 0}%` }}
+                          style={{ width: `${updater.percent ?? 0}%` }}
                         />
                       </div>
                     )}
