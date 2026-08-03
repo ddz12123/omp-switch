@@ -130,6 +130,38 @@ function ModelFields({
           />
         </div>
       </div>
+      <div className="grid gap-1">
+        <Label className="text-muted-foreground text-xs">输入类型</Label>
+        <div className="flex gap-2">
+          {(['text', 'image'] as const).map((type) => {
+            const current = model.input ?? ['text']
+            const active = current.includes(type)
+            return (
+              <button
+                key={type}
+                type="button"
+                onClick={() => {
+                  const remaining = current.filter((t) => t !== type)
+                  const next = active
+                    ? remaining.length > 0
+                      ? remaining
+                      : ['text']
+                    : [...current, type]
+                  onChange({ ...model, input: next })
+                }}
+                className={cn(
+                  'rounded-md border px-3 py-1.5 text-sm transition-colors',
+                  active
+                    ? 'border-primary/50 bg-primary/10 text-foreground'
+                    : 'text-muted-foreground hover:bg-muted/40'
+                )}
+              >
+                {type}
+              </button>
+            )
+          })}
+        </div>
+      </div>
       <div className="grid grid-cols-4 gap-2">
         {(
           [
@@ -204,7 +236,7 @@ export default function ProviderDialog({
   const [draftError, setDraftError] = useState<string | null>(null)
 
   const addModel = (): void => {
-    setDraft({ id: '', reasoning: true, input: ['text', 'image'] })
+    setDraft({ id: '', reasoning: true, input: ['text'] })
     setDraftError(null)
   }
 
@@ -279,7 +311,7 @@ export default function ProviderDialog({
   const addSelectedModels = (): void => {
     const additions = (fetched ?? [])
       .filter((id) => selected.has(id))
-      .map<ModelDef>((id) => ({ id, reasoning: true, input: ['text', 'image'] }))
+      .map<ModelDef>((id) => ({ id, reasoning: true, input: ['text'] }))
     setModels([...models, ...additions])
     setFetched(null)
   }
