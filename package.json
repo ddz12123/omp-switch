@@ -1,6 +1,6 @@
 {
   "name": "omp-switch",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "packageManager": "pnpm@11.18.0",
   "engines": {
     "node": ">=22.13"
