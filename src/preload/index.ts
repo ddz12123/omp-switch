@@ -42,8 +42,7 @@ const api: PreloadApi = {
   listMcpServers: () => ipcRenderer.invoke('mcp:list'),
   mcpStorePath: () => ipcRenderer.invoke('mcp:store-path'),
   showMcpInFolder: () => ipcRenderer.invoke('mcp:show-in-folder'),
-  saveMcpServer: (originalName, name, config) =>
-    ipcRenderer.invoke('mcp:save', originalName, name, config),
+  saveMcpServer: (request) => ipcRenderer.invoke('mcp:save', request),
   deleteMcpServer: (name) => ipcRenderer.invoke('mcp:delete', name),
   toggleMcpServer: (name, agentId, enabled) =>
     ipcRenderer.invoke('mcp:toggle', name, agentId, enabled),

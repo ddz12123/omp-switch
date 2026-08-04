@@ -225,17 +225,57 @@ export interface SkillsShSkill {
   installs: number
 }
 
-/**
- * MCP 服务器定义：与各 CLI mcp.json 里 mcpServers 的值一致，原样透传。
- * stdio: command/args/env；http/sse: url/headers。
- */
-export type McpServerConfig = Record<string, unknown>
+/** OMP 原生支持的 MCP 传输类型。 */
+export type McpTransport = 'stdio' | 'http' | 'sse'
 
-/** 中央库里一个 MCP 服务器及其启用状态 */
+/** OMP MCP JSON-RPC request id 的生成格式。 */
+export type McpRequestIdFormat = 'string' | 'number'
+
+/**
+ * MCP 服务器定义：覆盖 OMP 的常用字段，同时允许扩展字段原样透传。
+ * stdio 使用 command/args/cwd/env；http/sse 使用 url/headers。
+ */
+export interface McpServerConfig {
+  type?: McpTransport
+  enabled?: boolean
+  timeout?: number
+  requestIdFormat?: McpRequestIdFormat
+  command?: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string>
+  url?: string
+  headers?: Record<string, string>
+  [key: string]: unknown
+}
+
+/** 中央库里一个 MCP 服务器及其启用状态。 */
 export interface McpServerInfo {
   name: string
   config: McpServerConfig
-  /** 已写入（启用）的 Agent */
+  /** 当前实际启用的 Agent；OMP 会综合 enabledServers / disabledServers / server.enabled。 */
+  agents: AgentId[]
+}
+
+/** 某个 Agent 的 mcp.json 无法读取或解析时的局部错误。 */
+export interface McpTargetError {
+  agentId: AgentId
+  label: string
+  path: string
+  message: string
+}
+
+/** MCP 列表和各 Agent 配置的独立读取错误。 */
+export interface McpListResult {
+  servers: McpServerInfo[]
+  targetErrors: McpTargetError[]
+}
+
+/** 新增/编辑 MCP 定义及其目标 Agent 的单次事务提交参数。 */
+export interface McpSaveRequest {
+  originalName: string | null
+  name: string
+  config: McpServerConfig
   agents: AgentId[]
 }
 

@@ -5,8 +5,8 @@ import type {
   AppConfigResult,
   CliVersionInfo,
   ConfigFileKind,
-  McpServerConfig,
-  McpServerInfo,
+  McpListResult,
+  McpSaveRequest,
   ProviderMap,
   RawConfigFile,
   RemoteSkillsResult,
@@ -97,17 +97,17 @@ export interface PreloadApi {
   resyncSkills(mode: SkillSyncMode): Promise<void>
   /** 在资源管理器中打开技能存储目录 */
   showSkillsDirInFolder(): Promise<void>
-  /** 列出中央库全部 MCP 服务器及各自已启用的 Agent */
-  listMcpServers(): Promise<McpServerInfo[]>
+  /** 列出中央库全部 MCP 服务器、实际启用的 Agent 和各目标配置错误。 */
+  listMcpServers(): Promise<McpListResult>
   /** MCP 中央库文件（mcp-servers.json）的绝对路径 */
   mcpStorePath(): Promise<string>
   /** 在资源管理器中显示 MCP 中央库文件（不存在时打开所在目录） */
   showMcpInFolder(): Promise<void>
-  /** 新增/编辑 MCP 服务器定义（originalName 非空表示编辑，改名会同步替换各 Agent 配置） */
-  saveMcpServer(originalName: string | null, name: string, config: McpServerConfig): Promise<void>
-  /** 删除 MCP 服务器：从中央库和所有 Agent 的 mcp.json 移除 */
+  /** 新增/编辑/改名并设置全部目标 Agent；中央库和 Agent 配置一次事务提交。 */
+  saveMcpServer(request: McpSaveRequest): Promise<void>
+  /** 删除 MCP 服务器：中央库和所有 Agent 配置一次事务提交。 */
   deleteMcpServer(name: string): Promise<void>
-  /** 启用/停用某 MCP 服务器到某 Agent（写入/移出其 mcp.json） */
+  /** 启用/停用单个目标，写入失败时恢复原始配置。 */
   toggleMcpServer(name: string, agentId: AgentId, enabled: boolean): Promise<void>
   /** 列出所有已探测到的会话根目录（默认 home + env 覆盖 + 用户自定义），供设置页展示 */
   sessionRoots(): Promise<SessionRootInfo[]>

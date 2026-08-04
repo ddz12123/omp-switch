@@ -7,7 +7,7 @@ import type {
   AgentId,
   AppConfig,
   ConfigFileKind,
-  McpServerConfig,
+  McpSaveRequest,
   ProviderMap,
   RuleFileInfo,
   SkillSyncMode,
@@ -267,11 +267,7 @@ export function registerIpc(refreshTray: () => void): void {
     else await shell.openPath(dirname(path))
   })
 
-  ipcMain.handle(
-    'mcp:save',
-    (_e, originalName: string | null, name: string, config: McpServerConfig) =>
-      saveMcpServer(originalName, name, config)
-  )
+  ipcMain.handle('mcp:save', (_e, request: McpSaveRequest) => saveMcpServer(request))
 
   ipcMain.handle('mcp:delete', (_e, name: string) => deleteMcpServer(name))
 
