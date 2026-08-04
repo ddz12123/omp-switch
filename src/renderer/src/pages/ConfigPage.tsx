@@ -124,6 +124,7 @@ export default function ConfigPage(): React.JSX.Element {
         ) : (
           <div className="flex flex-col gap-4">
             <button
+              type="button"
               onClick={() => void window.api.showConfigInFolder(agent, 'switch')}
               className="text-muted-foreground/70 hover:text-foreground flex max-w-full items-center gap-1 font-mono text-xs transition-colors"
               title="在文件夹中显示"

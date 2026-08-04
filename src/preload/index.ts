@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 import type { PreloadApi } from '../shared/api'
 import type { AgentId, UpdaterEvent } from '../shared/types'
 
@@ -25,6 +24,8 @@ const api: PreloadApi = {
   pickConfigFilePath: () => ipcRenderer.invoke('config-fields:pick-file'),
   readAppConfig: () => ipcRenderer.invoke('app-config:read'),
   writeAppConfig: (config) => ipcRenderer.invoke('app-config:write', config),
+  restoreAppConfigBackup: () => ipcRenderer.invoke('app-config:restore-backup'),
+  resetInvalidAppConfig: () => ipcRenderer.invoke('app-config:reset-invalid'),
   showAppConfigInFolder: () => ipcRenderer.invoke('app-config:show-in-folder'),
   changeAppConfigDir: () => ipcRenderer.invoke('app-config:change-dir'),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
@@ -74,16 +75,4 @@ const api: PreloadApi = {
   }
 }
 
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', api)
-  } catch (error) {
-    console.error(error)
-  }
-} else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.api = api
-}
+contextBridge.exposeInMainWorld('api', api)

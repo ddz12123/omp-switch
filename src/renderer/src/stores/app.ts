@@ -1,9 +1,10 @@
-import { create } from 'zustand'
+﻿import { create } from 'zustand'
 import { toast } from 'sonner'
 import type {
   AgentId,
   AgentStatus,
   AppConfig,
+  AppConfigResult,
   ProviderMap,
   SkillRepo,
   SkillSyncMode,
@@ -31,6 +32,11 @@ interface AppState {
   websites: Record<string, string>
   /** ~/.omp-switch/config.json 的实际路径（设置页展示） */
   appConfigPath: string
+  /** 应用配置损坏时的恢复状态；非空时禁止常规保存。 */
+  appConfigIssue: Pick<
+    AppConfigResult,
+    'path' | 'error' | 'backupAvailable' | 'backupPath' | 'backupError'
+  > | null
   /** 主界面 Agent 的展示顺序（含隐藏项，供设置页排序） */
   agentOrder: AgentId[]
   /** 主界面不展示的 Agent */
@@ -66,6 +72,10 @@ interface AppState {
   updateWebsites: (websites: Record<string, string>) => void
   /** 弹目录选择框，把配置迁移到用户选的目录 */
   changeAppConfigDir: () => Promise<void>
+  /** 从校验通过的 .bak 恢复损坏配置。 */
+  restoreAppConfigBackup: () => Promise<void>
+  /** 保留损坏快照后重置应用配置。 */
+  resetInvalidAppConfig: () => Promise<void>
   /** 拖拽排序后提交新的显示顺序 */
   setAgentOrder: (order: AgentId[]) => void
   /** 主界面显示/隐藏某个 Agent，至少保留一个可见 */
@@ -102,7 +112,12 @@ let fileConfig: AppConfig = {}
 
 /** 把当前偏好合并进配置文件整体写回（失败仅提示，不回滚 UI），返回落盘 promise */
 function persistAppConfig(): Promise<void> {
-  const { theme, closeBehavior, websites, agentOrder, hiddenAgents } = useApp.getState()
+  const { theme, closeBehavior, websites, agentOrder, hiddenAgents, appConfigIssue } =
+    useApp.getState()
+  if (appConfigIssue) {
+    toast.error('应用配置已损坏，恢复或重置前不会覆盖原文件')
+    return Promise.resolve()
+  }
   fileConfig = {
     ...fileConfig,
     theme,
@@ -149,6 +164,7 @@ export const useApp = create<AppState>((set, get) => ({
   closeBehavior: getCloseBehavior(),
   websites: {},
   appConfigPath: '',
+  appConfigIssue: null,
   agentOrder: [...AGENT_IDS],
   hiddenAgents: [],
   skillsDir: '',
@@ -219,6 +235,29 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
+  restoreAppConfigBackup: async () => {
+    try {
+      const result = await window.api.restoreAppConfigBackup()
+      if (result.status !== 'ok') throw new Error('备份恢复后配置仍不可用')
+      set({ appConfigIssue: null })
+      toast.success('已从备份恢复应用配置')
+      await get().init()
+    } catch (error) {
+      toast.error(`恢复应用配置失败：${errorMessage(error)}`)
+    }
+  },
+
+  resetInvalidAppConfig: async () => {
+    try {
+      const result = await window.api.resetInvalidAppConfig()
+      if (result.status !== 'ok') throw new Error('重置后配置仍不可用')
+      set({ appConfigIssue: null })
+      toast.success('已保留损坏快照并重置应用配置')
+      await get().init()
+    } catch (error) {
+      toast.error(`重置应用配置失败：${errorMessage(error)}`)
+    }
+  },
   setAgentOrder: (order) => {
     // 防御：拖拽提交的顺序必须与现有集合一致
     if (order.length !== get().agentOrder.length) return
@@ -330,7 +369,18 @@ export const useApp = create<AppState>((set, get) => ({
   init: async () => {
     // 本应用配置：文件为准；文件缺失的字段从 localStorage 迁移（历史版本）
     try {
-      const { path, config } = await window.api.readAppConfig()
+      const result = await window.api.readAppConfig()
+      const { path, config } = result
+      const appConfigIssue =
+        result.status === 'invalid'
+          ? {
+              path,
+              error: result.error,
+              backupAvailable: result.backupAvailable,
+              backupPath: result.backupPath,
+              backupError: result.backupError
+            }
+          : null
       fileConfig = config
       const theme = config.theme ?? getStoredTheme()
       const closeBehavior = config.closeBehavior ?? getCloseBehavior()
@@ -358,22 +408,27 @@ export const useApp = create<AppState>((set, get) => ({
         skillsSyncMode,
         skillsRepos,
         sessionsCustomDirs,
-        appConfigPath: path
+        appConfigPath: path,
+        appConfigIssue
       })
       applyTheme(theme)
       // localStorage 只作下次启动的首屏镜像
       storeTheme(theme)
       storeCloseBehavior(closeBehavior)
       // 未自定义目录时异步解析默认路径供设置页展示
-      if (!skillsDir) void get().ensureSkillsDir()
+      if (!skillsDir && result.status !== 'invalid') void get().ensureSkillsDir()
       // 文件里缺字段（首次运行/迁移）时补写一次
       if (
-        config.theme !== theme ||
-        config.closeBehavior !== closeBehavior ||
-        config.websites === undefined ||
-        config.agents === undefined
+        result.status !== 'invalid' &&
+        (config.theme !== theme ||
+          config.closeBehavior !== closeBehavior ||
+          config.websites === undefined ||
+          config.agents === undefined)
       ) {
         persistAppConfig()
+      }
+      if (result.status === 'invalid') {
+        toast.error('应用配置已损坏，已进入保护模式，请到设置页恢复或重置')
       }
     } catch (error) {
       toast.error(`应用配置读取失败：${errorMessage(error)}`)

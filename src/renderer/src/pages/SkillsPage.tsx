@@ -578,6 +578,7 @@ function BrowseTab({
         ] as const
       ).map((s) => (
         <button
+          type="button"
           key={s.id}
           onClick={() => setSourceTab(s.id)}
           className={cn(
@@ -908,6 +909,7 @@ export default function SkillsPage({ onBack }: { onBack?: () => void }): React.J
         <div className="bg-muted flex shrink-0 rounded-lg p-0.5">
           {TABS.map((t) => (
             <button
+              type="button"
               key={t.id}
               onClick={() => setTab(t.id)}
               className={cn(

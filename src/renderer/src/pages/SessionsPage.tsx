@@ -9,9 +9,10 @@ import {
   Search,
   Trash2
 } from 'lucide-react'
+import type { editor as MonacoEditor } from 'monaco-editor/editor/editor.api.js'
 import type { AgentId, SessionMeta, SessionRaw, SessionRootInfo } from '@shared/types'
 import { AGENT_IDS } from '@shared/types'
-import { monaco } from '../lib/monaco'
+import { loadMonaco } from '../lib/monaco'
 import { errorMessage } from '../stores/app'
 import { cn } from '../lib/utils'
 import { AgentIcon } from '../components/AgentIcon'
@@ -74,51 +75,78 @@ function rootAgent(root: SessionRootInfo): AgentId | null {
   return null
 }
 
-/** 只读 Monaco 展示单个会话的原始 JSONL；filePath 变化时整体重挂 */
+/** 使用 Monaco 只读展示单个会话的原始 JSONL；filePath 变化时整体重挂 */
 function RawViewer({ filePath }: { filePath: string }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [raw, setRaw] = useState<SessionRaw | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [editorReady, setEditorReady] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    window.api
-      .readSessionRaw(filePath)
-      .then((r) => {
-        if (!cancelled) setRaw(r)
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(errorMessage(e))
-      })
+    const timer = window.setTimeout(() => {
+      if (cancelled) return
+      setRaw(null)
+      setError(null)
+      setEditorReady(false)
+      void window.api
+        .readSessionRaw(filePath)
+        .then((r) => {
+          if (!cancelled) setRaw(r)
+        })
+        .catch((e: unknown) => {
+          if (!cancelled) setError(errorMessage(e))
+        })
+    }, 0)
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
     }
   }, [filePath])
 
   useEffect(() => {
     if (!raw || !containerRef.current) return undefined
-    const editor = monaco.editor.create(containerRef.current, {
-      value: raw.content,
-      language: 'plaintext',
-      theme: document.documentElement.classList.contains('dark') ? 'vs-dark' : 'vs',
-      readOnly: true,
-      automaticLayout: true,
-      minimap: { enabled: false },
-      fontSize: 12,
-      lineHeight: 18,
-      tabSize: 2,
-      wordWrap: 'on',
-      scrollBeyondLastLine: false,
-      renderLineHighlight: 'none',
-      fixedOverflowWidgets: true,
-      padding: { top: 8, bottom: 8 }
-    })
-    return () => editor.dispose()
+    let disposed = false
+    let editor: MonacoEditor.IStandaloneCodeEditor | null = null
+
+    setEditorReady(false)
+    void loadMonaco('plaintext')
+      .then((monaco) => {
+        if (disposed || !containerRef.current) return
+        editor = monaco.editor.create(containerRef.current, {
+          value: raw.content,
+          language: 'plaintext',
+          theme: document.documentElement.classList.contains('dark') ? 'vs-dark' : 'vs',
+          readOnly: true,
+          automaticLayout: true,
+          minimap: { enabled: false },
+          fontSize: 12,
+          lineHeight: 18,
+          tabSize: 2,
+          wordWrap: 'on',
+          scrollBeyondLastLine: false,
+          renderLineHighlight: 'none',
+          fixedOverflowWidgets: true,
+          padding: { top: 8, bottom: 8 }
+        })
+        setEditorReady(true)
+      })
+      .catch((e: unknown) => {
+        if (!disposed) setError(`编辑器加载失败：${errorMessage(e)}`)
+      })
+
+    return () => {
+      disposed = true
+      editor?.dispose()
+    }
   }, [raw])
 
   if (error) {
     return (
-      <div className="text-destructive flex h-full items-center justify-center p-4 text-center text-sm">
+      <div
+        className="text-destructive flex h-full items-center justify-center p-4 text-center text-sm"
+        role="alert"
+      >
         {error}
       </div>
     )
@@ -132,9 +160,22 @@ function RawViewer({ filePath }: { filePath: string }): React.JSX.Element {
         </div>
       )}
       {raw ? (
-        <div ref={containerRef} className="min-h-0 flex-1" />
+        <div className="relative min-h-0 flex-1">
+          <div ref={containerRef} className="h-full" aria-label="会话原始 JSONL" />
+          {!editorReady && (
+            <div
+              className="bg-background/80 text-muted-foreground absolute inset-0 flex items-center justify-center text-sm"
+              role="status"
+            >
+              编辑器加载中…
+            </div>
+          )}
+        </div>
       ) : (
-        <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
+        <div
+          className="text-muted-foreground flex h-full items-center justify-center text-sm"
+          role="status"
+        >
           加载中…
         </div>
       )}
@@ -290,7 +331,11 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
           <div className="flex shrink-0 items-center gap-2">
             <div className="relative flex-1">
               <Search className="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
+              <label htmlFor="session-search" className="sr-only">
+                搜索会话
+              </label>
               <Input
+                id="session-search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="搜索标题 / 目录 / ID"
@@ -308,7 +353,7 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
           </div>
 
           <Select value={rootFilter} onValueChange={setRootFilter}>
-            <SelectTrigger className="w-full">
+            <SelectTrigger className="w-full" aria-label="按会话目录筛选">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -330,6 +375,7 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
           {multiSelect && (
             <div className="flex shrink-0 items-center justify-between gap-2">
               <button
+                type="button"
                 onClick={toggleSelectAll}
                 className="text-muted-foreground hover:text-foreground text-xs"
               >
@@ -363,9 +409,8 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
                   return (
                     <div
                       key={s.filePath}
-                      onClick={() => setActiveFilePath(s.filePath)}
                       className={cn(
-                        'flex cursor-pointer gap-2 rounded-lg border px-3 py-2 text-left transition-colors',
+                        'flex gap-2 rounded-lg border px-3 py-2 text-left transition-colors',
                         isActive
                           ? 'border-primary bg-accent'
                           : 'hover:bg-accent/50 border-black/[0.06] dark:border-white/[0.08]'
@@ -375,12 +420,17 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
                         <input
                           type="checkbox"
                           checked={selected.has(s.filePath)}
-                          onClick={(e) => e.stopPropagation()}
                           onChange={() => toggleSelect(s.filePath)}
+                          aria-label={`选择会话：${s.title}`}
                           className="accent-primary mt-1 size-3.5 shrink-0"
                         />
                       )}
-                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setActiveFilePath(s.filePath)}
+                        aria-current={isActive ? 'true' : undefined}
+                        className="flex min-w-0 flex-1 flex-col gap-0.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
                         <span className="truncate text-sm font-medium">{s.title}</span>
                         <span className="text-muted-foreground/80 truncate font-mono text-[11px]">
                           {s.cwd || '—'}
@@ -406,7 +456,7 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
                           )}
                           <span className="ml-auto shrink-0">{formatSize(s.size)}</span>
                         </div>
-                      </div>
+                      </button>
                     </div>
                   )
                 })}

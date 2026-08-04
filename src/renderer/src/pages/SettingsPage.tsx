@@ -40,6 +40,7 @@ import type { CloseBehavior } from '../lib/closeBehavior'
 import { useApp } from '../stores/app'
 import { cn } from '../lib/utils'
 import { AgentIcon } from '../components/AgentIcon'
+import ConfirmDialog from '../components/ConfirmDialog'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
@@ -182,7 +183,10 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
     setAgentOrder,
     setAgentHidden,
     appConfigPath,
+    appConfigIssue,
     changeAppConfigDir,
+    restoreAppConfigBackup,
+    resetInvalidAppConfig,
     skillsDir,
     skillsSyncMode,
     setSkillsSyncMode,
@@ -194,6 +198,8 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
     downloadUpdate,
     installUpdate
   } = useApp()
+
+  const [resetConfigOpen, setResetConfigOpen] = useState(false)
 
   // MCP 中央库路径异步获取（仅设置页展示）
   const [mcpStorePath, setMcpStorePath] = useState('')
@@ -319,6 +325,7 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
         <div className="bg-muted/60 ml-1 flex w-fit items-center gap-1 rounded-xl p-1">
           {SETTINGS_TABS.map((t) => (
             <button
+              type="button"
               key={t.value}
               onClick={() => handleTabChange(t.value)}
               className={cn(
@@ -346,6 +353,7 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
                 <div className="flex gap-2">
                   {THEME_OPTIONS.map((option) => (
                     <button
+                      type="button"
                       key={option.value}
                       onClick={() => setTheme(option.value)}
                       className={cn(
@@ -489,6 +497,7 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
                   <div className="bg-muted flex rounded-lg p-0.5">
                     {SYNC_OPTIONS.map((option) => (
                       <button
+                        type="button"
                         key={option.value}
                         title={option.hint}
                         onClick={() => void setSkillsSyncMode(option.value)}
@@ -839,6 +848,57 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
                 <CardTitle>配置文件路径</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
+                {appConfigIssue && (
+                  <div
+                    role="alert"
+                    className="border-destructive/40 bg-destructive/5 flex flex-col gap-3 rounded-lg border p-3 text-sm"
+                  >
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="text-destructive mt-0.5 size-4 shrink-0" />
+                      <div className="min-w-0 space-y-1">
+                        <p className="font-medium">应用配置 JSON 已损坏，当前处于只读保护模式</p>
+                        <p className="text-muted-foreground break-words">
+                          {appConfigIssue.error ||
+                            '无法解析配置文件。恢复或重置前，应用不会覆盖原文件。'}
+                        </p>
+                        {appConfigIssue.backupError && (
+                          <p className="text-muted-foreground break-words">
+                            备份也无法解析：{appConfigIssue.backupError}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void restoreAppConfigBackup()}
+                        disabled={!appConfigIssue.backupAvailable}
+                      >
+                        <RotateCw />
+                        从备份恢复
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => setResetConfigOpen(true)}
+                      >
+                        <Trash2 />
+                        保留快照并重置
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void window.api.showAppConfigInFolder()}
+                      >
+                        <FolderOpen />
+                        打开文件位置
+                      </Button>
+                    </div>
+                  </div>
+                )}{' '}
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex min-w-0 flex-col gap-1 text-sm">
                     <span className="font-medium">OMP Switch（本应用：主题、官网映射等）</span>
@@ -886,6 +946,15 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
         )}
       </div>
 
+      {resetConfigOpen && (
+        <ConfirmDialog
+          title="重置损坏的应用配置？"
+          description="当前损坏文件会保留为带时间戳的 .corrupt 快照，然后创建新的空配置。主题、仓库和自定义目录等应用偏好需要重新设置。"
+          confirmLabel="保留快照并重置"
+          onConfirm={() => void resetInvalidAppConfig()}
+          onClose={() => setResetConfigOpen(false)}
+        />
+      )}
       <Dialog open={cmdDialog !== null} onOpenChange={(open) => !open && setCmdDialog(null)}>
         <DialogContent>
           <DialogHeader>

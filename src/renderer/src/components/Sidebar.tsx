@@ -37,7 +37,12 @@ export function Sidebar(): React.JSX.Element {
 
   const renderItem = (item: NavItem, trailing?: React.ReactNode): React.JSX.Element => (
     <div key={item.id} className="flex min-w-0 items-center gap-1.5">
-      <button onClick={() => setPage(item.id)} className={itemCls(item.id)}>
+      <button
+        type="button"
+        onClick={() => setPage(item.id)}
+        className={itemCls(item.id)}
+        aria-current={page === item.id ? 'page' : undefined}
+      >
         <item.icon className={iconCls(item.id)} />
         {item.label}
       </button>

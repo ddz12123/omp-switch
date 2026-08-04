@@ -246,6 +246,8 @@ export interface McpServerConfig {
   env?: Record<string, string>
   url?: string
   headers?: Record<string, string>
+  auth?: unknown
+  oauth?: unknown
   [key: string]: unknown
 }
 
@@ -309,9 +311,19 @@ export interface AppConfig {
   [key: string]: unknown
 }
 
+export type AppConfigStatus = 'ok' | 'missing' | 'invalid'
+
 export interface AppConfigResult {
+  status: AppConfigStatus
   path: string
   config: AppConfig
+  /** status=invalid 时的 JSON 解析或结构错误。 */
+  error?: string
+  /** 是否存在校验通过的 `<config>.bak`。 */
+  backupAvailable?: boolean
+  backupPath?: string
+  /** 备份文件存在但同样损坏时的错误。 */
+  backupError?: string
 }
 
 /** 会话管理设置 */

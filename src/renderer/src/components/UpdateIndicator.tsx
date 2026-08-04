@@ -15,8 +15,10 @@ export default function UpdateIndicator(): React.JSX.Element | null {
     case 'available':
       return (
         <button
+          type="button"
           onClick={downloadUpdate}
           title={`检测到新版本 v${updater.version}，点击下载更新`}
+          aria-label={`检测到新版本 v${updater.version}，下载更新`}
           className="text-amber-500 transition-colors hover:text-amber-600"
         >
           <Sparkles className="size-4" />
@@ -49,7 +51,15 @@ function DownloadRing({ percent }: { percent: number }): React.JSX.Element {
   const circumference = 2 * Math.PI * r
   const offset = circumference * (1 - Math.min(100, Math.max(0, percent)) / 100)
   return (
-    <div className="relative shrink-0" title={`正在下载更新 ${Math.round(percent)}%`}>
+    <div
+      className="relative shrink-0"
+      title={`正在下载更新 ${Math.round(percent)}%`}
+      role="progressbar"
+      aria-label="正在下载更新"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(percent)}
+    >
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="block">
         <circle
           cx={size / 2}

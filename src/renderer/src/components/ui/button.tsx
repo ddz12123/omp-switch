@@ -36,6 +36,9 @@ function Button({
   variant,
   size,
   asChild = false,
+  type,
+  title,
+  'aria-label': ariaLabel,
   ...props
 }: React.ComponentProps<'button'> &
   VariantProps<typeof buttonVariants> & {
@@ -45,6 +48,9 @@ function Button({
   return (
     <Comp
       data-slot="button"
+      type={asChild ? undefined : (type ?? 'button')}
+      title={title}
+      aria-label={ariaLabel ?? (size === 'icon' ? title : undefined)}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />

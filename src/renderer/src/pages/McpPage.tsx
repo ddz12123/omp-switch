@@ -291,7 +291,7 @@ function McpEditDialog({ original, onClose, onSaved }: McpEditDialogProps): Reac
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-2xl">
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{original ? `编辑 ${original.name}` : '添加 MCP 服务器'}</DialogTitle>
           <DialogDescription>
@@ -299,7 +299,7 @@ function McpEditDialog({ original, onClose, onSaved }: McpEditDialogProps): Reac
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-2 pb-4">
           {!original && (
             <div className="flex flex-wrap gap-1.5" aria-label="MCP 预设">
               {PRESETS.map((preset) => (
@@ -353,11 +353,11 @@ function McpEditDialog({ original, onClose, onSaved }: McpEditDialogProps): Reac
 
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
-              <Label htmlFor="mcp-enabled">配置内启用</Label>
+              <Label htmlFor="mcp-enabled">服务自身启用</Label>
               <Switch
                 id="mcp-enabled"
                 checked={config.enabled !== false}
-                aria-label="配置内启用 MCP 服务器"
+                aria-label="设置 MCP 服务自身启用状态"
                 onCheckedChange={(checked) => updateField('enabled', checked)}
               />
             </div>
@@ -402,6 +402,11 @@ function McpEditDialog({ original, onClose, onSaved }: McpEditDialogProps): Reac
               </Select>
             </div>
           </div>
+
+          <p className="text-muted-foreground -mt-2 text-xs">
+            “服务自身启用”控制 JSON 中的 enabled
+            字段；下方“同步并启用到”决定写入哪些客户端。通常保持开启即可。
+          </p>
 
           {transport === 'stdio' ? (
             <div className="grid gap-4 sm:grid-cols-2">
@@ -520,7 +525,7 @@ function McpEditDialog({ original, onClose, onSaved }: McpEditDialogProps): Reac
           </div>
 
           <fieldset className="flex flex-col gap-1.5">
-            <legend className="text-sm font-medium">启用到</legend>
+            <legend className="text-sm font-medium">同步并启用到</legend>
             <div className="flex gap-2">
               {AGENT_IDS.map((id) => {
                 const status = statuses.find((item) => item.id === id)
@@ -557,7 +562,7 @@ function McpEditDialog({ original, onClose, onSaved }: McpEditDialogProps): Reac
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0 pt-2 pb-1">
           <Button type="button" variant="outline" onClick={onClose}>
             取消
           </Button>

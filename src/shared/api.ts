@@ -67,8 +67,12 @@ export interface PreloadApi {
   pickConfigFilePath(): Promise<string | null>
   /** 读取本应用配置（默认 ~/.omp-switch/config.json，可自定义目录）及其路径 */
   readAppConfig(): Promise<AppConfigResult>
-  /** 整体覆写本应用配置 */
+  /** 整体覆写本应用配置；当前文件损坏时会拒绝覆盖。 */
   writeAppConfig(config: AppConfig): Promise<void>
+  /** 从校验通过的 .bak 恢复损坏配置。 */
+  restoreAppConfigBackup(): Promise<AppConfigResult>
+  /** 保留损坏快照后重置应用配置。 */
+  resetInvalidAppConfig(): Promise<AppConfigResult>
   /** 在资源管理器中显示本应用配置文件 */
   showAppConfigInFolder(): Promise<void>
   /** 弹目录选择框迁移配置存储位置，取消返回 null，成功返回新路径 */

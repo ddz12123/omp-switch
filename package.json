@@ -1,6 +1,6 @@
 {
   "name": "omp-switch",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "packageManager": "pnpm@11.18.0",
   "engines": {
     "node": ">=22.13"
@@ -30,6 +30,8 @@
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",
+    "check": "pnpm run lint && pnpm run typecheck",
+    "audit:prod": "pnpm audit --prod --audit-level critical --registry=https://registry.npmjs.org",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
@@ -43,7 +45,6 @@
     "build:linux": "pnpm run build && electron-builder --linux"
   },
   "dependencies": {
-    "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-label": "^2.1.7",

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { AlertCircle, MessagesSquare, Plug, Wrench, X } from 'lucide-react'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import { AlertCircle, LoaderCircle, MessagesSquare, Plug, Wrench, X } from 'lucide-react'
 import { useApp, GLOBAL_PAGES, type PageId } from './stores/app'
 import { Sidebar } from './components/Sidebar'
 import { AgentIcon } from './components/AgentIcon'
@@ -7,14 +7,15 @@ import { cn } from './lib/utils'
 import { Button } from './components/ui/button'
 import { Toaster } from './components/ui/sonner'
 import CloseConfirmDialog from './components/CloseConfirmDialog'
-import ProvidersPage from './pages/ProvidersPage'
-import SwitchPage from './pages/SwitchPage'
-import ConfigPage from './pages/ConfigPage'
-import RulesPage from './pages/RulesPage'
-import SkillsPage from './pages/SkillsPage'
-import McpPage from './pages/McpPage'
-import SessionsPage from './pages/SessionsPage'
-import SettingsPage from './pages/SettingsPage'
+
+const ProvidersPage = lazy(() => import('./pages/ProvidersPage'))
+const SwitchPage = lazy(() => import('./pages/SwitchPage'))
+const ConfigPage = lazy(() => import('./pages/ConfigPage'))
+const RulesPage = lazy(() => import('./pages/RulesPage'))
+const SkillsPage = lazy(() => import('./pages/SkillsPage'))
+const McpPage = lazy(() => import('./pages/McpPage'))
+const SessionsPage = lazy(() => import('./pages/SessionsPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 
 /** 顶栏右侧共用页导航（点击进入对应全局页） */
 const TOP_NAV: { id: PageId; label: string; icon: React.ComponentType<{ className?: string }> }[] =
@@ -23,6 +24,19 @@ const TOP_NAV: { id: PageId; label: string; icon: React.ComponentType<{ classNam
     { id: 'mcp', label: 'MCP', icon: Plug },
     { id: 'sessions', label: '会话', icon: MessagesSquare }
   ]
+
+function PageFallback(): React.JSX.Element {
+  return (
+    <div
+      className="text-muted-foreground flex h-full min-h-40 items-center justify-center gap-2 text-sm"
+      role="status"
+      aria-live="polite"
+    >
+      <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+      页面加载中…
+    </div>
+  )
+}
 
 export default function App(): React.JSX.Element {
   const {
@@ -88,10 +102,12 @@ export default function App(): React.JSX.Element {
             key={page}
             className="animate-in fade-in slide-in-from-bottom-2 flex h-full min-h-0 flex-col px-7 pt-6 duration-300 [animation-timing-function:var(--ease-fluid)]"
           >
-            {page === 'skills' && <SkillsPage onBack={goBack} />}
-            {page === 'mcp' && <McpPage onBack={goBack} />}
-            {page === 'sessions' && <SessionsPage onBack={goBack} />}
-            {page === 'settings' && <SettingsPage onBack={goBack} />}
+            <Suspense fallback={<PageFallback />}>
+              {page === 'skills' && <SkillsPage onBack={goBack} />}
+              {page === 'mcp' && <McpPage onBack={goBack} />}
+              {page === 'sessions' && <SessionsPage onBack={goBack} />}
+              {page === 'settings' && <SettingsPage onBack={goBack} />}
+            </Suspense>
           </div>
         </main>
       ) : (
@@ -100,16 +116,19 @@ export default function App(): React.JSX.Element {
           <header className="border-border/60 flex h-14 shrink-0 items-center gap-5 border-b px-5">
             <h1 className="text-sm font-semibold tracking-tight">OMP Switch</h1>
             {/* 分段控件：滑块滑动到目标位置，而不是两个背景瞬间交换 */}
-            <div className="bg-muted relative flex rounded-[10px] p-1">
+            <div className="bg-muted relative flex rounded-[10px] p-1" aria-label="选择 Agent">
               <div
                 className="bg-card absolute inset-y-1 left-1 w-28 rounded-lg shadow-sm transition-transform duration-300 [transition-timing-function:var(--ease-fluid)]"
                 style={{ transform: `translateX(${agentIndex * 7}rem)` }}
+                aria-hidden="true"
               />
               {visibleAgents.map((id) => {
                 const status = statuses.find((s) => s.id === id)
                 return (
                   <button
                     key={id}
+                    type="button"
+                    aria-pressed={agent === id}
                     onClick={() => setAgent(id)}
                     className={cn(
                       'relative z-10 flex w-28 items-center justify-center gap-2 rounded-lg py-1.5 text-sm font-medium transition-colors duration-200',
@@ -124,6 +143,7 @@ export default function App(): React.JSX.Element {
                       <span
                         className="size-1.5 rounded-full bg-amber-500/80"
                         title="未检测到配置"
+                        aria-label="未检测到配置"
                       />
                     )}
                   </button>
@@ -131,14 +151,15 @@ export default function App(): React.JSX.Element {
               })}
             </div>
             {/* 共用页导航（右侧）：点击进入全局全屏页 */}
-            <nav className="ml-auto flex items-center gap-1">
+            <nav className="ml-auto flex items-center gap-1" aria-label="全局功能">
               {TOP_NAV.map((item) => (
                 <button
                   key={item.id}
+                  type="button"
                   onClick={() => setPage(item.id)}
                   className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04] flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors"
                 >
-                  <item.icon className="size-4" />
+                  <item.icon className="size-4" aria-hidden="true" />
                   {item.label}
                 </button>
               ))}
@@ -165,10 +186,14 @@ export default function App(): React.JSX.Element {
 
                 {/* 全局错误条 */}
                 {error && (
-                  <div className="border-destructive/30 bg-destructive/10 text-destructive mb-4 flex items-start gap-2 rounded-lg border px-4 py-3 text-sm">
-                    <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                  <div
+                    className="border-destructive/30 bg-destructive/10 text-destructive mb-4 flex items-start gap-2 rounded-lg border px-4 py-3 text-sm"
+                    role="alert"
+                  >
+                    <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                     <div className="min-w-0 flex-1 break-all">{error}</div>
                     <Button
+                      type="button"
                       variant="ghost"
                       size="sm"
                       className="h-6 px-2"
@@ -176,18 +201,26 @@ export default function App(): React.JSX.Element {
                     >
                       重试
                     </Button>
-                    <button onClick={clearError} className="opacity-60 hover:opacity-100">
-                      <X className="size-4" />
+                    <button
+                      type="button"
+                      onClick={clearError}
+                      className="opacity-60 hover:opacity-100"
+                      aria-label="关闭错误提示"
+                      title="关闭错误提示"
+                    >
+                      <X className="size-4" aria-hidden="true" />
                     </button>
                   </div>
                 )}
 
                 {/* 供应商 / 模型切换整体在滚动区内 */}
                 <div className="min-h-0 flex-1 overflow-y-auto pb-6">
-                  {page === 'providers' && <ProvidersPage />}
-                  {page === 'switch' && <SwitchPage />}
-                  {page === 'config' && <ConfigPage />}
-                  {page === 'rules' && <RulesPage />}
+                  <Suspense fallback={<PageFallback />}>
+                    {page === 'providers' && <ProvidersPage />}
+                    {page === 'switch' && <SwitchPage />}
+                    {page === 'config' && <ConfigPage />}
+                    {page === 'rules' && <RulesPage />}
+                  </Suspense>
                 </div>
               </div>
             </main>

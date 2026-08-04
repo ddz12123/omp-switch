@@ -66,6 +66,7 @@ function DialogContent({
           onClick={() => setFullscreen((v) => !v)}
           className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-11 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           title={fullscreen ? '退出全屏' : '全屏'}
+          aria-label={fullscreen ? '退出全屏' : '全屏'}
         >
           {fullscreen ? <Minimize2Icon /> : <Maximize2Icon />}
           <span className="sr-only">{fullscreen ? '退出全屏' : '全屏'}</span>
@@ -93,7 +94,10 @@ function DialogFooter({ className, ...props }: React.ComponentProps<'div'>): Rea
   return (
     <div
       data-slot="dialog-footer"
-      className={cn('flex flex-col-reverse gap-2 sm:flex-row sm:justify-end', className)}
+      className={cn(
+        'flex shrink-0 flex-col-reverse gap-2 pb-1 sm:flex-row sm:justify-end',
+        className
+      )}
       {...props}
     />
   )

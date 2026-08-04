@@ -1,40 +1,110 @@
 name: Release
 
-# 推送 v 开头的 tag（如 v1.0.0）时触发，或在 Actions 页手动触发
+# Push a version tag such as v1.0.0, or run the workflow manually.
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
 
-# electron-builder 用内置的 GITHUB_TOKEN 创建 Release 并上传产物，需要写权限
+# Default to read-only. Jobs that create or upload a release opt into write access.
 permissions:
-  contents: write
+  contents: read
 
-# 同一个 tag 重复推送时，取消上一次未完成的运行
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # 先单独把草稿 Release 建好，避免三平台并行各自创建导致重复草稿
-  prepare:
+  quality:
+    name: Quality and security gates
     runs-on: ubuntu-latest
     steps:
-      - name: 检出代码
+      - name: Check out source
         uses: actions/checkout@v4
 
-      - name: 计算 tag 并创建草稿（已存在则跳过）
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          expected_tag="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
+            echo "Release tag $GITHUB_REF_NAME does not match package version $expected_tag." >&2
+            exit 1
+          fi
+
+      - name: Run lint and type checks
+        run: pnpm run check
+
+      - name: Audit production dependencies
+        id: audit
+        shell: bash
+        run: |
+          set +e
+          pnpm audit --prod --audit-level critical --json --registry=https://registry.npmjs.org > pnpm-audit.json
+          audit_exit=$?
+          set -e
+
+          if [ ! -s pnpm-audit.json ]; then
+            printf '{"error":"pnpm audit did not produce a report","exitCode":%s}\n' "$audit_exit" > pnpm-audit.json
+          fi
+
+          cat pnpm-audit.json
+          echo "exit_code=$audit_exit" >> "$GITHUB_OUTPUT"
+
+      - name: Upload dependency audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-dependency-audit
+          path: pnpm-audit.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce critical vulnerability gate
+        if: steps.audit.outputs.exit_code != '0'
+        shell: bash
+        run: |
+          echo "Production dependency audit failed. Review the uploaded pnpm-audit.json report." >&2
+          exit 1
+
+  prepare:
+    name: Prepare draft release
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Create draft release if needed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          TAG="v$(node -p "require('./package.json').version")"
-          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "$TAG" --notes "release $TAG"
+          tag="v$(node -p "require('./package.json').version")"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --title "$tag" --notes "release $tag"
           fi
 
   release:
+    name: Build ${{ matrix.os }}
     needs: prepare
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -44,30 +114,47 @@ jobs:
           - os: macos-latest
             args: '--mac'
           - os: ubuntu-latest
-            # 跳过 snap：CI 上构建 snap 需要额外的 snapcraft 工具链，容易失败
+            # Snap needs an additional snapcraft toolchain in CI; publish AppImage and deb here.
             args: '--linux AppImage deb'
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: 检出代码
+      - name: Check out source
         uses: actions/checkout@v4
 
-      - name: 安装 pnpm
+      - name: Install pnpm
         uses: pnpm/action-setup@v4
 
-      - name: 安装 Node.js
+      - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
-      - name: 安装依赖
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: 类型检查 + 构建 + 打包并发布到 Releases
+      - name: Build and publish Windows or Linux
+        if: runner.os != 'macOS'
+        shell: bash
         run: |
           pnpm run build
           pnpm exec electron-builder ${{ matrix.args }} --publish always
         env:
-          # electron-builder 读取 GH_TOKEN 上传到 GitHub Releases
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          pnpm run build
+          pnpm exec electron-builder ${{ matrix.args }} --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signing is enabled automatically when both values are configured.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # Notarization is enabled automatically when this complete credential set is configured.
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

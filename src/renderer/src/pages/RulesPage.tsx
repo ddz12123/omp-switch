@@ -87,6 +87,7 @@ export default function RulesPage(): React.JSX.Element {
                   </div>
                   <p className="text-muted-foreground mt-1 text-sm">{meta.desc}</p>
                   <button
+                    type="button"
                     onClick={() => void window.api.showRuleInFolder(agent, file.name)}
                     className="text-muted-foreground/70 hover:text-foreground mt-0.5 flex max-w-full items-center gap-1 font-mono text-xs transition-colors"
                     title="在文件夹中显示"

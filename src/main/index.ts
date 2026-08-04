@@ -8,6 +8,7 @@ import { setupTray } from './tray'
 import { setupUpdater } from './updater'
 import {
   configureTrustedRendererUrl,
+  assertTrustedIpcSender,
   isAllowedExternalUrl,
   isTrustedRendererUrl
 } from './lib/security'
@@ -104,7 +105,9 @@ app.whenReady().then(() => {
   app.on('second-instance', showWindow)
 
   // 渲染层关闭确认框的结果：最小化到托盘（销毁窗口省内存）或直接退出
-  ipcMain.on('window:close-action', (_event, action: 'minimize' | 'quit') => {
+  ipcMain.on('window:close-action', (event, action: unknown) => {
+    assertTrustedIpcSender(event)
+    if (action !== 'minimize' && action !== 'quit') return
     if (action === 'quit') {
       isQuitting = true
       app.quit()

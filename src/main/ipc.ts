@@ -17,7 +17,14 @@ import type { FetchRemoteModelsPayload } from '../shared/api'
 import { getAdapter, getAgentStatuses } from './agents'
 import { fetchRemoteModels } from './remoteModels'
 import { getCliVersions } from './cliVersion'
-import { changeConfigDir, getAppConfigPath, readAppConfig, writeAppConfig } from './appConfig'
+import {
+  changeConfigDir,
+  getAppConfigPath,
+  inspectAppConfig,
+  resetInvalidAppConfig,
+  restoreAppConfigBackup,
+  writeAppConfig
+} from './appConfig'
 import {
   deleteSkill,
   fetchRepoSkills,
@@ -47,7 +54,16 @@ import {
 } from './sessions'
 import { readTextFile, writeTextFileSafe } from './lib/fileio'
 import { checkForUpdates, downloadUpdate, quitAndInstall } from './updater'
+import { assertTrustedIpcSender, isAllowedExternalUrl } from './lib/security'
 
+type InvokeHandler = Parameters<typeof ipcMain.handle>[1]
+
+function handle(channel: string, listener: InvokeHandler): void {
+  ipcMain.handle(channel, (event, ...args) => {
+    assertTrustedIpcSender(event)
+    return listener(event, ...args)
+  })
+}
 /** 根据类别取原始配置文件路径 */
 function rawConfigPath(agentId: AgentId, kind: ConfigFileKind): string {
   const adapter = getAdapter(agentId)
@@ -75,23 +91,23 @@ function assertSyntax(path: string, content: string): void {
  * handler 抛出的异常会以 rejected promise 形式传给渲染进程展示。
  */
 export function registerIpc(refreshTray: () => void): void {
-  ipcMain.handle('agents:status', () => getAgentStatuses())
+  handle('agents:status', () => getAgentStatuses())
 
-  ipcMain.handle('providers:read', (_e, agentId: AgentId) => getAdapter(agentId).readProviders())
+  handle('providers:read', (_e, agentId: AgentId) => getAdapter(agentId).readProviders())
 
-  ipcMain.handle('providers:write', async (_e, agentId: AgentId, map: ProviderMap) => {
+  handle('providers:write', async (_e, agentId: AgentId, map: ProviderMap) => {
     await getAdapter(agentId).writeProviders(map)
     refreshTray()
   })
 
-  ipcMain.handle('switch:read', (_e, agentId: AgentId) => getAdapter(agentId).readSwitchState())
+  handle('switch:read', (_e, agentId: AgentId) => getAdapter(agentId).readSwitchState())
 
-  ipcMain.handle('switch:write', async (_e, agentId: AgentId, state: SwitchState) => {
+  handle('switch:write', async (_e, agentId: AgentId, state: SwitchState) => {
     await getAdapter(agentId).writeSwitchState(state)
     refreshTray()
   })
 
-  ipcMain.handle('rules:list', async (_e, agentId: AgentId) => {
+  handle('rules:list', async (_e, agentId: AgentId) => {
     const adapter = getAdapter(agentId)
     const files: RuleFileInfo[] = []
     for (const spec of adapter.ruleFiles) {
@@ -101,7 +117,7 @@ export function registerIpc(refreshTray: () => void): void {
     return files
   })
 
-  ipcMain.handle('rules:write', async (_e, agentId: AgentId, name: string, content: string) => {
+  handle('rules:write', async (_e, agentId: AgentId, name: string, content: string) => {
     const adapter = getAdapter(agentId)
     const spec = adapter.ruleFiles.find((f) => f.name === name)
     if (!spec) throw new Error(`未知规则文件: ${name}`)
@@ -109,7 +125,7 @@ export function registerIpc(refreshTray: () => void): void {
     refreshTray()
   })
 
-  ipcMain.handle('rules:show-in-folder', (_e, agentId: AgentId, name: string) => {
+  handle('rules:show-in-folder', (_e, agentId: AgentId, name: string) => {
     const adapter = getAdapter(agentId)
     const spec = adapter.ruleFiles.find((f) => f.name === name)
     if (!spec) throw new Error(`未知规则文件: ${name}`)
@@ -117,7 +133,7 @@ export function registerIpc(refreshTray: () => void): void {
     else void shell.openPath(dirname(spec.path))
   })
 
-  ipcMain.handle('config-fields:read', async (_e, agentId: AgentId) => {
+  handle('config-fields:read', async (_e, agentId: AgentId) => {
     const adapter = getAdapter(agentId)
     return {
       path: adapter.switchPath,
@@ -126,7 +142,7 @@ export function registerIpc(refreshTray: () => void): void {
     }
   })
 
-  ipcMain.handle(
+  handle(
     'config-fields:write',
     async (_e, agentId: AgentId, updates: Record<string, unknown>, deletes: string[]) => {
       const adapter = getAdapter(agentId)
@@ -140,7 +156,7 @@ export function registerIpc(refreshTray: () => void): void {
     }
   )
 
-  ipcMain.handle('config-fields:pick-file', async (e) => {
+  handle('config-fields:pick-file', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     const options: Electron.OpenDialogOptions = {
       title: '选择文件',
@@ -152,25 +168,25 @@ export function registerIpc(refreshTray: () => void): void {
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
 
-  ipcMain.handle('models:fetch-remote', (_e, payload: FetchRemoteModelsPayload) =>
+  handle('models:fetch-remote', (_e, payload: FetchRemoteModelsPayload) =>
     fetchRemoteModels(payload)
   )
 
-  ipcMain.handle('cli:versions', () => getCliVersions())
+  handle('cli:versions', () => getCliVersions())
 
-  ipcMain.handle('config:show-in-folder', async (_e, agentId: AgentId, kind: ConfigFileKind) => {
+  handle('config:show-in-folder', async (_e, agentId: AgentId, kind: ConfigFileKind) => {
     const path = rawConfigPath(agentId, kind)
     await mkdir(dirname(path), { recursive: true })
     if (existsSync(path)) shell.showItemInFolder(path)
     else await shell.openPath(dirname(path))
   })
 
-  ipcMain.handle('config:read-raw', async (_e, agentId: AgentId, kind: ConfigFileKind) => {
+  handle('config:read-raw', async (_e, agentId: AgentId, kind: ConfigFileKind) => {
     const path = rawConfigPath(agentId, kind)
     return { path, content: (await readTextFile(path)) ?? '' }
   })
 
-  ipcMain.handle(
+  handle(
     'config:write-raw',
     async (_e, agentId: AgentId, kind: ConfigFileKind, content: string) => {
       const path = rawConfigPath(agentId, kind)
@@ -180,25 +196,24 @@ export function registerIpc(refreshTray: () => void): void {
     }
   )
 
-  ipcMain.handle('shell:open-external', (_e, url: string) => {
+  handle('shell:open-external', (_e, url: string) => {
     // 只放行 http/https，防止渲染层传入任意协议
-    if (!/^https?:\/\//i.test(url)) throw new Error(`拒绝打开非 http(s) 链接: ${url}`)
+    if (!isAllowedExternalUrl(url)) throw new Error(`拒绝打开不安全的外部链接: ${url}`)
     return shell.openExternal(url)
   })
 
-  ipcMain.handle('app-config:read', async () => ({
-    path: await getAppConfigPath(),
-    config: await readAppConfig()
-  }))
+  handle('app-config:read', () => inspectAppConfig())
 
-  ipcMain.handle('app-config:write', (_e, config: AppConfig) => writeAppConfig(config))
+  handle('app-config:write', (_e, config: AppConfig) => writeAppConfig(config))
+  handle('app-config:restore-backup', () => restoreAppConfigBackup())
+  handle('app-config:reset-invalid', () => resetInvalidAppConfig())
 
-  ipcMain.handle('app-config:show-in-folder', async () => {
+  handle('app-config:show-in-folder', async () => {
     shell.showItemInFolder(await getAppConfigPath())
   })
 
   /** 弹目录选择框并迁移配置，取消时返回 null，成功返回新的 config.json 路径 */
-  ipcMain.handle('app-config:change-dir', async (e) => {
+  handle('app-config:change-dir', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     const options = {
       title: '选择配置文件存储目录',
@@ -211,38 +226,38 @@ export function registerIpc(refreshTray: () => void): void {
     return changeConfigDir(result.filePaths[0])
   })
 
-  ipcMain.handle('skills:list', () => listSkills())
+  handle('skills:list', () => listSkills())
 
-  ipcMain.handle('skills:sync', (_e, dir: string, agentId: AgentId, enabled: boolean) =>
+  handle('skills:sync', (_e, dir: string, agentId: AgentId, enabled: boolean) =>
     setSkillSync(dir, agentId, enabled)
   )
 
-  ipcMain.handle('skills:delete', (_e, dir: string) => deleteSkill(dir))
+  handle('skills:delete', (_e, dir: string) => deleteSkill(dir))
 
-  ipcMain.handle('skills:repo-skills', (_e, input: string, branch?: string) =>
+  handle('skills:repo-skills', (_e, input: string, branch?: string) =>
     fetchRepoSkills(input, branch)
   )
 
-  ipcMain.handle('skills:install', (_e, repo: string, branch: string, paths: string[]) =>
+  handle('skills:install', (_e, repo: string, branch: string, paths: string[]) =>
     installSkills(repo, branch, paths)
   )
 
-  ipcMain.handle('skills:check-updates', () => checkSkillUpdates())
+  handle('skills:check-updates', () => checkSkillUpdates())
 
-  ipcMain.handle('skills:update', (_e, dir: string) => updateSkill(dir))
+  handle('skills:update', (_e, dir: string) => updateSkill(dir))
 
-  ipcMain.handle('skills:search-sh', (_e, query: string) => searchSkillsSh(query))
+  handle('skills:search-sh', (_e, query: string) => searchSkillsSh(query))
 
-  ipcMain.handle('skills:resync', (_e, mode: SkillSyncMode) => resyncSkills(mode))
+  handle('skills:resync', (_e, mode: SkillSyncMode) => resyncSkills(mode))
 
-  ipcMain.handle('skills:show-in-folder', async () => {
+  handle('skills:show-in-folder', async () => {
     const dir = await getSkillsDir()
     await mkdir(dir, { recursive: true })
     await shell.openPath(dir)
   })
 
   /** 弹目录选择框迁移技能存储位置，取消返回 null；新路径由渲染层写回 config */
-  ipcMain.handle('skills:change-dir', async (e) => {
+  handle('skills:change-dir', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     const options = {
       title: '选择技能存储目录',
@@ -255,41 +270,41 @@ export function registerIpc(refreshTray: () => void): void {
     return migrateSkillsDir(result.filePaths[0])
   })
 
-  ipcMain.handle('mcp:list', () => listMcpServers())
+  handle('mcp:list', () => listMcpServers())
 
-  ipcMain.handle('mcp:store-path', () => getMcpStorePath())
+  handle('mcp:store-path', () => getMcpStorePath())
 
   /** 在资源管理器中显示中央库文件；文件尚不存在则打开其所在目录 */
-  ipcMain.handle('mcp:show-in-folder', async () => {
+  handle('mcp:show-in-folder', async () => {
     const path = await getMcpStorePath()
     await mkdir(dirname(path), { recursive: true })
     if (existsSync(path)) shell.showItemInFolder(path)
     else await shell.openPath(dirname(path))
   })
 
-  ipcMain.handle('mcp:save', (_e, request: McpSaveRequest) => saveMcpServer(request))
+  handle('mcp:save', (_e, request: McpSaveRequest) => saveMcpServer(request))
 
-  ipcMain.handle('mcp:delete', (_e, name: string) => deleteMcpServer(name))
+  handle('mcp:delete', (_e, name: string) => deleteMcpServer(name))
 
-  ipcMain.handle('mcp:toggle', (_e, name: string, agentId: AgentId, enabled: boolean) =>
+  handle('mcp:toggle', (_e, name: string, agentId: AgentId, enabled: boolean) =>
     toggleMcpServer(name, agentId, enabled)
   )
 
-  ipcMain.handle('sessions:roots', () => resolveSessionRoots())
+  handle('sessions:roots', () => resolveSessionRoots())
 
-  ipcMain.handle('sessions:list', () => listSessions())
+  handle('sessions:list', () => listSessions())
 
-  ipcMain.handle('sessions:read-raw', (_e, filePath: string) => readSessionRaw(filePath))
+  handle('sessions:read-raw', (_e, filePath: string) => readSessionRaw(filePath))
 
-  ipcMain.handle('sessions:delete', (_e, filePaths: string[]) => deleteSessions(filePaths))
+  handle('sessions:delete', (_e, filePaths: string[]) => deleteSessions(filePaths))
 
   /** 在资源管理器中定位会话文件（路径经安全校验，须落在某个会话根内） */
-  ipcMain.handle('sessions:show-in-folder', async (_e, filePath: string) => {
+  handle('sessions:show-in-folder', async (_e, filePath: string) => {
     shell.showItemInFolder(await resolveSafeSessionPath(filePath))
   })
 
   /** 弹目录选择框添加自定义会话目录，取消返回 null；新路径由渲染层写回 config */
-  ipcMain.handle('sessions:add-dir', async (e) => {
+  handle('sessions:add-dir', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     const options = {
       title: '选择会话目录',
@@ -303,8 +318,8 @@ export function registerIpc(refreshTray: () => void): void {
   })
 
   // ── 应用自更新 ──────────────────────────────────────────────
-  ipcMain.handle('app:version', () => app.getVersion())
-  ipcMain.handle('updater:check', () => checkForUpdates())
-  ipcMain.handle('updater:download', () => downloadUpdate())
-  ipcMain.handle('updater:quit-install', () => quitAndInstall())
+  handle('app:version', () => app.getVersion())
+  handle('updater:check', () => checkForUpdates())
+  handle('updater:download', () => downloadUpdate())
+  handle('updater:quit-install', () => quitAndInstall())
 }
