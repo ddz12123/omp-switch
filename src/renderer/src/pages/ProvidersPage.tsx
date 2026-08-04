@@ -72,8 +72,8 @@ export default function ProvidersPage(): React.JSX.Element {
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
+    <div className="flex h-full min-h-0 flex-col gap-5">
+      <div className="flex shrink-0 items-center justify-between">
         <h2 className="text-lg font-semibold">
           供应商
           <span className="text-muted-foreground ml-2 text-sm font-normal">
@@ -104,7 +104,7 @@ export default function ProvidersPage(): React.JSX.Element {
           还没有供应商，点击右上角「添加供应商」创建第一个
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1 pb-6">
           {providerNames.map((name) => {
             const provider = providers[name]
             const roles = usedBy(name)

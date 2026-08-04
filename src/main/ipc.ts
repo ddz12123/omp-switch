@@ -50,7 +50,8 @@ import {
   listSessions,
   readSessionRaw,
   resolveSafeSessionPath,
-  resolveSessionRoots
+  resolveSessionRoots,
+  resolveSessionWorkingDirectory
 } from './sessions'
 import { readTextFile, writeTextFileSafe } from './lib/fileio'
 import { checkForUpdates, downloadUpdate, quitAndInstall } from './updater'
@@ -301,6 +302,12 @@ export function registerIpc(refreshTray: () => void): void {
   /** 在资源管理器中定位会话文件（路径经安全校验，须落在某个会话根内） */
   handle('sessions:show-in-folder', async (_e, filePath: string) => {
     shell.showItemInFolder(await resolveSafeSessionPath(filePath))
+  })
+
+  /** Open the cwd read from the validated session file; never trust a renderer-provided cwd. */
+  handle('sessions:open-working-directory', async (_e, filePath: string) => {
+    const error = await shell.openPath(await resolveSessionWorkingDirectory(filePath))
+    if (error) throw new Error(`Failed to open session working directory: ${error}`)
   })
 
   /** 弹目录选择框添加自定义会话目录，取消返回 null；新路径由渲染层写回 config */

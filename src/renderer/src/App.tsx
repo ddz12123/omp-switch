@@ -97,10 +97,10 @@ export default function App(): React.JSX.Element {
     <div className="flex h-screen flex-col">
       {isGlobal ? (
         /* 全局页（Skills / MCP / 会话 / 设置）：隐藏侧边栏与 Agent 切换，页面自带返回按钮 */
-        <main className="min-h-0 flex-1 overflow-hidden">
+        <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
           <div
             key={page}
-            className="animate-in fade-in slide-in-from-bottom-2 flex h-full min-h-0 flex-col px-7 pt-6 duration-300 [animation-timing-function:var(--ease-fluid)]"
+            className="animate-in fade-in slide-in-from-bottom-2 flex h-full min-h-0 min-w-0 flex-col px-7 pt-6 duration-300 [animation-timing-function:var(--ease-fluid)]"
           >
             <Suspense fallback={<PageFallback />}>
               {page === 'skills' && <SkillsPage onBack={goBack} />}
@@ -214,7 +214,12 @@ export default function App(): React.JSX.Element {
                 )}
 
                 {/* 供应商 / 模型切换整体在滚动区内 */}
-                <div className="min-h-0 flex-1 overflow-y-auto pb-6">
+                <div
+                  className={cn(
+                    'min-h-0 flex-1',
+                    page === 'providers' ? 'overflow-hidden' : 'overflow-y-auto pb-6'
+                  )}
+                >
                   <Suspense fallback={<PageFallback />}>
                     {page === 'providers' && <ProvidersPage />}
                     {page === 'switch' && <SwitchPage />}

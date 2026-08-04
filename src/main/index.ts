@@ -72,10 +72,17 @@ function createWindow(): void {
     if (!isTrustedRendererUrl(url)) event.preventDefault()
   })
 
-  // This application does not need camera, microphone, notifications, geolocation, or devices.
-  mainWindow.webContents.session.setPermissionCheckHandler(() => false)
-  mainWindow.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => {
-    callback(false)
+  // Only allow sanitized clipboard writes from our trusted renderer. Clipboard reads and all
+  // other sensitive web permissions remain denied.
+  mainWindow.webContents.session.setPermissionCheckHandler((contents, permission) => {
+    return (
+      permission === 'clipboard-sanitized-write' &&
+      contents !== null &&
+      isTrustedRendererUrl(contents.getURL())
+    )
+  })
+  mainWindow.webContents.session.setPermissionRequestHandler((contents, permission, callback) => {
+    callback(permission === 'clipboard-sanitized-write' && isTrustedRendererUrl(contents.getURL()))
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {

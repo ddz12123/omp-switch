@@ -298,6 +298,23 @@ export async function readSessionRaw(filePath: string): Promise<SessionRaw> {
   return { filePath: resolved, content: await readFile(resolved, 'utf-8'), truncated: false }
 }
 
+/** Resolve the existing working directory recorded inside a validated session file. */
+export async function resolveSessionWorkingDirectory(filePath: string): Promise<string> {
+  const resolvedSession = await assertSessionPath(filePath)
+  const meta = parseHeadMeta(await readHead(resolvedSession, HEAD_BYTES))
+  const expanded = meta.cwd ? expandTilde(meta.cwd.trim()) : ''
+  if (!expanded || !isAbsolute(expanded)) {
+    throw new Error('Session does not contain a valid absolute working directory')
+  }
+
+  const workingDirectory = normalizeId(expanded)
+  const workingDirectoryStat = await stat(workingDirectory)
+  if (!workingDirectoryStat.isDirectory()) {
+    throw new Error(`Session working directory does not exist: ${workingDirectory}`)
+  }
+  return normalizeId(await realpath(workingDirectory))
+}
+
 /**
  * 批量删除会话，逐条：
  * ① 路径安全校验（须落在某个会话根内）；② 删 .jsonl；

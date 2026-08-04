@@ -85,7 +85,7 @@
   }
   body {
     @apply bg-background text-foreground;
-    user-select: none;
+    user-select: text;
     /* 系统字体自带光学尺寸与字距表（apple-design §15） */
     font-family:
       system-ui,

@@ -52,6 +52,8 @@ const api: PreloadApi = {
   readSessionRaw: (filePath) => ipcRenderer.invoke('sessions:read-raw', filePath),
   deleteSessions: (filePaths) => ipcRenderer.invoke('sessions:delete', filePaths),
   showSessionInFolder: (filePath) => ipcRenderer.invoke('sessions:show-in-folder', filePath),
+  openSessionWorkingDirectory: (filePath) =>
+    ipcRenderer.invoke('sessions:open-working-directory', filePath),
   addSessionDir: () => ipcRenderer.invoke('sessions:add-dir'),
   onStateChanged: (callback) => {
     const listener = (_e: Electron.IpcRendererEvent, agentId: AgentId): void => callback(agentId)

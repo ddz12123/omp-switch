@@ -123,6 +123,8 @@ export interface PreloadApi {
   deleteSessions(filePaths: string[]): Promise<{ deleted: number }>
   /** 在资源管理器中显示某个会话文件 */
   showSessionInFolder(filePath: string): Promise<void>
+  /** Open the working directory recorded by a validated session file. */
+  openSessionWorkingDirectory(filePath: string): Promise<void>
   /** 弹目录选择框添加自定义会话目录，取消返回 null，成功返回所选目录 */
   addSessionDir(): Promise<string | null>
   /** 订阅主进程侧（托盘）触发的配置变更，返回取消订阅函数 */

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   ArrowLeft,
+  Copy,
   FileText,
   FolderOpen,
   ListChecks,
@@ -153,14 +154,14 @@ function RawViewer({ filePath }: { filePath: string }): React.JSX.Element {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {raw?.truncated && (
         <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-500">
           文件过大，仅展示前 8MB 内容
         </div>
       )}
       {raw ? (
-        <div className="relative min-h-0 flex-1">
+        <div className="relative min-h-0 min-w-0 flex-1">
           <div ref={containerRef} className="h-full" aria-label="会话原始 JSONL" />
           {!editorReady && (
             <div
@@ -256,6 +257,32 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
     [sessions, activeFilePath]
   )
   const activeRoot = active ? (roots.find((r) => r.id === active.rootId) ?? null) : null
+  const activeAgent = activeRoot ? rootAgent(activeRoot) : null
+  const resumeCommand =
+    active && activeAgent === 'omp'
+      ? `omp --resume ${active.id}`
+      : active && activeAgent === 'pi'
+        ? `pi --session ${active.id}`
+        : null
+
+  const copyResumeCommand = async (): Promise<void> => {
+    if (!resumeCommand) return
+    try {
+      await navigator.clipboard.writeText(resumeCommand)
+      toast.success('\u6062\u590d\u547d\u4ee4\u5df2\u590d\u5236')
+    } catch (error) {
+      toast.error(`\u590d\u5236\u5931\u8d25\uff1a${errorMessage(error)}`)
+    }
+  }
+
+  const openWorkingDirectory = async (): Promise<void> => {
+    if (!active?.cwd) return
+    try {
+      await window.api.openSessionWorkingDirectory(active.filePath)
+    } catch (error) {
+      toast.error(`\u6253\u5f00\u5de5\u4f5c\u76ee\u5f55\u5931\u8d25\uff1a${errorMessage(error)}`)
+    }
+  }
 
   const toggleSelect = (filePath: string): void => {
     setSelected((prev) => {
@@ -292,7 +319,7 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden">
       <div className="flex shrink-0 items-center justify-between">
         <div className="flex items-center gap-3">
           <Button
@@ -325,9 +352,9 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
         </Button>
       </div>
 
-      <div className="flex min-h-0 flex-1 gap-4">
+      <div className="flex min-h-0 min-w-0 flex-1 gap-4 overflow-hidden">
         {/* 左栏：搜索 + 多选 + 分组列表 */}
-        <div className="flex w-80 shrink-0 flex-col gap-3">
+        <div className="flex w-80 min-w-0 shrink-0 flex-col gap-3 overflow-hidden">
           <div className="flex shrink-0 items-center gap-2">
             <div className="relative flex-1">
               <Search className="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
@@ -393,7 +420,7 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
             </div>
           )}
 
-          <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
+          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pr-0.5">
             {loading ? (
               <div className="text-muted-foreground py-16 text-center text-sm">加载中…</div>
             ) : visible.length === 0 ? (
@@ -401,7 +428,7 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
                 {sessions.length === 0 ? '暂无会话' : '没有匹配的会话'}
               </div>
             ) : (
-              <div className="flex flex-col gap-1.5">
+              <div className="flex min-w-0 flex-col gap-1.5">
                 {visible.map((s) => {
                   const isActive = s.filePath === activeFilePath
                   const itemRoot = roots.find((r) => r.id === s.rootId) ?? null
@@ -410,7 +437,7 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
                     <div
                       key={s.filePath}
                       className={cn(
-                        'flex gap-2 rounded-lg border px-3 py-2 text-left transition-colors',
+                        'flex min-w-0 gap-2 overflow-hidden rounded-lg border px-3 py-2 text-left transition-colors',
                         isActive
                           ? 'border-primary bg-accent'
                           : 'hover:bg-accent/50 border-black/[0.06] dark:border-white/[0.08]'
@@ -435,7 +462,7 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
                         <span className="text-muted-foreground/80 truncate font-mono text-[11px]">
                           {s.cwd || '—'}
                         </span>
-                        <div className="text-muted-foreground flex items-center gap-2 text-[11px]">
+                        <div className="text-muted-foreground flex min-w-0 items-center gap-2 overflow-hidden text-[11px]">
                           <span className="shrink-0">{relativeTime(s.updatedAt)}</span>
                           {itemAgent ? (
                             <span className="flex shrink-0 items-center" title={itemRoot?.label}>
@@ -449,11 +476,6 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
                               </Badge>
                             )
                           )}
-                          {s.model && (
-                            <Badge variant="outline" className="truncate text-[10px]">
-                              {s.model}
-                            </Badge>
-                          )}
                           <span className="ml-auto shrink-0">{formatSize(s.size)}</span>
                         </div>
                       </button>
@@ -466,7 +488,7 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
         </div>
 
         {/* 右栏：详情 + 原始 JSONL */}
-        <div className="bg-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-black/[0.06] dark:border-white/[0.08]">
+        <div className="bg-card flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-black/[0.06] dark:border-white/[0.08]">
           {active ? (
             <>
               <div className="shrink-0 border-b border-black/[0.06] p-4 dark:border-white/[0.08]">
@@ -505,7 +527,44 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
                     value={activeRoot ? `${activeRoot.label}（${activeRoot.path}）` : '—'}
                   />
                   <MetaRow label="会话 ID" value={active.id} />
-                  <MetaRow label="工作目录" value={active.cwd || '—'} />
+                  {resumeCommand && (
+                    <div className="grid grid-cols-[5rem_1fr] items-center gap-2">
+                      <span className="text-muted-foreground shrink-0 text-xs">恢复命令</span>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <code className="bg-muted text-foreground/90 min-w-0 flex-1 break-all rounded px-2 py-1 text-xs">
+                          {resumeCommand}
+                        </code>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 shrink-0"
+                          title="复制恢复命令"
+                          onClick={() => void copyResumeCommand()}
+                        >
+                          <Copy aria-hidden="true" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-[5rem_1fr] items-center gap-2">
+                    <span className="text-muted-foreground shrink-0 text-xs">工作目录</span>
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="text-foreground/90 min-w-0 flex-1 break-all text-xs">
+                        {active.cwd || '—'}
+                      </span>
+                      {active.cwd && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 shrink-0"
+                          title="打开工作目录"
+                          onClick={() => void openWorkingDirectory()}
+                        >
+                          <FolderOpen aria-hidden="true" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
                   <MetaRow label="创建时间" value={formatDateTime(active.createdAt)} />
                   <MetaRow label="修改时间" value={formatDateTime(active.updatedAt)} />
                   <MetaRow label="模型" value={active.model || '—'} />
@@ -513,7 +572,7 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
                   <MetaRow label="完整路径" value={active.filePath} />
                 </div>
               </div>
-              <div className="min-h-0 flex-1">
+              <div className="min-h-0 min-w-0 flex-1">
                 <RawViewer key={active.filePath} filePath={active.filePath} />
               </div>
             </>
