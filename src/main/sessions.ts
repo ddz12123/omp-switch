@@ -328,15 +328,18 @@ export async function deleteSessions(filePaths: string[]): Promise<{ deleted: nu
       (root): root is string => root !== null
     )
   )
-  let deleted = 0
-  for (const filePath of filePaths) {
-    const resolved = await assertSessionPathInRoots(roots, filePath)
+  // Validate every path before mutating the filesystem. A top-level session can own a same-name
+  // log directory containing nested .jsonl sessions; deleting it first must not make validation of
+  // another selected nested session fail with ENOENT. Canonical paths also collapse root aliases.
+  const resolvedPaths = [
+    ...new Set(await Promise.all(filePaths.map((path) => assertSessionPathInRoots(roots, path))))
+  ]
+
+  for (const resolved of resolvedPaths) {
     await rm(resolved, { force: true })
 
     const logDir = await resolveSafeSessionLogDir(roots, resolved.replace(/\.jsonl$/i, ''))
     if (logDir) await rm(logDir, { recursive: true, force: true })
-
-    deleted++
 
     const parent = dirname(resolved)
     if (!rootIds.has(normalizeId(parent))) {
@@ -345,7 +348,7 @@ export async function deleteSessions(filePaths: string[]): Promise<{ deleted: nu
       if (remaining && remaining.length === 0) await rmdir(parent).catch(() => {})
     }
   }
-  return { deleted }
+  return { deleted: resolvedPaths.length }
 }
 
 /** 校验会话路径合法（供 ipc show-in-folder 复用） */
