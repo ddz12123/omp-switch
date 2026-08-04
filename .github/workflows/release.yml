@@ -146,15 +146,40 @@ jobs:
       - name: Build and publish macOS
         if: runner.os == 'macOS'
         shell: bash
-        run: |
-          pnpm run build
-          pnpm exec electron-builder ${{ matrix.args }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Signing is enabled automatically when both values are configured.
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          # Notarization is enabled automatically when this complete credential set is configured.
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Use neutral names here so electron-builder never sees an empty CSC_LINK/APPLE_* value.
+          MAC_CSC_LINK: ${{ secrets.CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          MAC_APPLE_ID: ${{ secrets.APPLE_ID }}
+          MAC_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          MAC_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          pnpm run build
+
+          if [[ -n "${MAC_CSC_LINK:-}" ]]; then
+            export CSC_LINK="$MAC_CSC_LINK"
+            if [[ -n "${MAC_CSC_KEY_PASSWORD:-}" ]]; then
+              export CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
+            else
+              unset CSC_KEY_PASSWORD
+            fi
+            echo "macOS code signing: enabled"
+          else
+            unset CSC_LINK CSC_KEY_PASSWORD
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            echo "macOS code signing: disabled (CSC_LINK secret is not configured)"
+          fi
+
+          if [[ -n "${MAC_APPLE_ID:-}" && -n "${MAC_APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${MAC_APPLE_TEAM_ID:-}" ]]; then
+            export APPLE_ID="$MAC_APPLE_ID"
+            export APPLE_APP_SPECIFIC_PASSWORD="$MAC_APPLE_APP_SPECIFIC_PASSWORD"
+            export APPLE_TEAM_ID="$MAC_APPLE_TEAM_ID"
+            echo "macOS notarization: enabled"
+          else
+            unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            echo "macOS notarization: disabled (Apple credentials are incomplete)"
+          fi
+
+          pnpm exec electron-builder ${{ matrix.args }} --publish always
