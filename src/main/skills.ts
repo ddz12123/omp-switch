@@ -1,18 +1,7 @@
 import { existsSync } from 'fs'
-import {
-  cp,
-  lstat,
-  mkdir,
-  readdir,
-  readFile,
-  realpath,
-  rm,
-  symlink,
-  unlink,
-  writeFile
-} from 'fs/promises'
-import { dirname, join, normalize, relative, resolve } from 'path'
-import { createHash } from 'crypto'
+import { cp, lstat, mkdir, readdir, readFile, realpath, rm, symlink, writeFile } from 'fs/promises'
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'path'
+import { createHash, randomUUID } from 'crypto'
 import AdmZip from 'adm-zip'
 import { parse as parseYaml } from 'yaml'
 import type {
@@ -29,6 +18,8 @@ import { isPlainObject } from './agents/types'
 import { getAdapter, listAdapters } from './agents'
 import { getConfigDir, readAppConfig } from './appConfig'
 import { readTextFile, writeTextFileSafe } from './lib/fileio'
+import { removePathNoFollow, replacePreparedPath } from './lib/atomicDirectory'
+import type { AtomicPathSwap } from './lib/atomicDirectory'
 
 /**
  * Skills 中央仓库管理：技能统一存在本应用目录（默认 <配置目录>/skills），
@@ -38,6 +29,44 @@ import { readTextFile, writeTextFileSafe } from './lib/fileio'
 
 const META_FILE = 'skills-meta.json'
 const GH_HEADERS = { 'User-Agent': 'omp-switch', Accept: 'application/vnd.github+json' }
+
+function isMissingError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function preparedSibling(parent: string, label: string): string {
+  return join(parent, `.omp-switch-${label}-prepared-${process.pid}-${randomUUID()}`)
+}
+
+async function rollbackSwaps(swaps: AtomicPathSwap[]): Promise<string[]> {
+  const errors: string[] = []
+  for (const swap of [...swaps].reverse()) {
+    try {
+      await swap.rollback()
+    } catch (error) {
+      errors.push(errorMessage(error))
+    }
+  }
+  return errors
+}
+
+async function finalizeSwaps(swaps: AtomicPathSwap[]): Promise<void> {
+  const errors: string[] = []
+  for (const swap of swaps) {
+    try {
+      await swap.finalize()
+    } catch (error) {
+      errors.push(errorMessage(error))
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(`The operation committed, but backup cleanup failed: ${errors.join('; ')}`)
+  }
+}
 
 interface SkillMeta {
   repo: string
@@ -133,6 +162,67 @@ function hashZipSkillDir(entries: ReturnType<AdmZip['getEntries']>, prefix: stri
   return hashSkillFiles(files)
 }
 
+function safeZipRelativePath(entryName: string, prefix: string): string {
+  const rel = entryName.slice(prefix.length).replace(/\\/g, '/')
+  const segments = rel.split('/')
+  if (
+    !rel ||
+    rel.startsWith('/') ||
+    /^[A-Za-z]:/.test(rel) ||
+    segments.some((segment) => segment === '' || segment === '.' || segment === '..')
+  ) {
+    throw new Error(`Unsafe skill archive entry: ${entryName}`)
+  }
+  return segments.join('/')
+}
+
+async function prepareSkillDirectory(
+  storeDir: string,
+  dirName: string,
+  entries: ReturnType<AdmZip['getEntries']>,
+  prefix: string
+): Promise<{ path: string; contentHash: string }> {
+  await mkdir(storeDir, { recursive: true })
+  const prepared = preparedSibling(storeDir, dirName)
+  try {
+    await mkdir(prepared)
+    const files = entries.filter(
+      (entry) => !entry.isDirectory && entry.entryName.startsWith(prefix)
+    )
+    if (!files.some((entry) => entry.entryName === `${prefix}SKILL.md`)) {
+      throw new Error('The skill archive does not contain SKILL.md')
+    }
+
+    for (const entry of files) {
+      const rel = safeZipRelativePath(entry.entryName, prefix)
+      const destination = resolve(prepared, ...rel.split('/'))
+      if (!isInsidePath(prepared, destination)) {
+        throw new Error(`Unsafe skill archive destination: ${entry.entryName}`)
+      }
+      await mkdir(dirname(destination), { recursive: true })
+      await writeFile(destination, entry.getData())
+    }
+
+    const manifestStat = await lstat(join(prepared, 'SKILL.md'))
+    if (!manifestStat.isFile()) throw new Error('SKILL.md is not a regular file')
+
+    const expectedHash = hashZipSkillDir(entries, prefix)
+    const actualHash = await hashLocalSkillDir(prepared)
+    if (actualHash !== expectedHash) {
+      throw new Error('The prepared skill failed content validation')
+    }
+    return { path: prepared, contentHash: expectedHash }
+  } catch (error) {
+    await removePathNoFollow(prepared).catch(() => {})
+    throw error
+  }
+}
+
+function isInsidePath(root: string, target: string): boolean {
+  const rel = relative(resolve(root), resolve(target))
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
 /** 下载来源仓库 zipball 并返回全部条目（安装/更新/更新检测共用） */
 async function downloadRepoZip(
   repo: string,
@@ -209,54 +299,94 @@ async function isSyncedTo(
   }
 }
 
-/**
- * 安全移除同步目标：软链接/junction 只删链接本身；
- * 真实目录必须含 SKILL.md 才允许递归删除，避免误删用户数据。
- */
-async function removeSyncTarget(target: string): Promise<void> {
-  let st: Awaited<ReturnType<typeof lstat>>
+/** Ensure an existing Agent target is a link or a recognizable skill directory before replacement. */
+async function assertReplaceableSyncTarget(target: string): Promise<void> {
+  let targetStat: Awaited<ReturnType<typeof lstat>>
   try {
-    st = await lstat(target)
-  } catch {
-    return // 不存在
+    targetStat = await lstat(target)
+  } catch (error) {
+    if (isMissingError(error)) return
+    throw error
   }
-  if (st.isSymbolicLink()) {
+  if (targetStat.isSymbolicLink()) return
+  if (targetStat.isDirectory()) {
     try {
-      await unlink(target)
-    } catch {
-      // Windows 目录 junction 需要按目录方式删除
-      await rm(target, { recursive: false, force: true })
+      const manifestStat = await lstat(join(target, 'SKILL.md'))
+      if (manifestStat.isFile()) return
+    } catch (error) {
+      if (!isMissingError(error)) throw error
     }
+  }
+  throw new Error(`${target} is not a replaceable skill target`)
+}
+
+/** Remove a synchronized target without following directory links or deleting unrelated data. */
+async function removeSyncTarget(target: string): Promise<void> {
+  let targetStat: Awaited<ReturnType<typeof lstat>>
+  try {
+    targetStat = await lstat(target)
+  } catch (error) {
+    if (isMissingError(error)) return
+    throw error
+  }
+  if (targetStat.isSymbolicLink()) {
+    await removePathNoFollow(target)
     return
   }
-  if (st.isDirectory()) {
-    if (!existsSync(join(target, 'SKILL.md'))) {
-      throw new Error(`${target} 不是技能目录，已拒绝删除`)
-    }
-    await rm(target, { recursive: true, force: true })
+  if (targetStat.isDirectory()) {
+    await assertReplaceableSyncTarget(target)
+    await removePathNoFollow(target)
   }
 }
 
-/** 把中央仓库里的技能按指定方式同步到某个 Agent 的技能目录 */
+/** Prepare and atomically swap one Agent synchronization target, retaining the old target. */
+async function stageSkillSync(
+  storeDir: string,
+  dirName: string,
+  adapter: AgentAdapter,
+  mode: SkillSyncMode
+): Promise<AtomicPathSwap> {
+  const source = resolve(storeDir, dirName)
+  const sourceStat = await lstat(source)
+  const manifestStat = await lstat(join(source, 'SKILL.md'))
+  if (!sourceStat.isDirectory() || !manifestStat.isFile()) {
+    throw new Error(`Skill ${dirName} does not contain a regular SKILL.md`)
+  }
+
+  await mkdir(adapter.skillsDir, { recursive: true })
+  const target = resolve(adapter.skillsDir, dirName)
+  await assertReplaceableSyncTarget(target)
+  const prepared = preparedSibling(adapter.skillsDir, dirName)
+
+  try {
+    if (mode === 'copy') {
+      await cp(source, prepared, { recursive: true })
+      const preparedManifest = await lstat(join(prepared, 'SKILL.md'))
+      if (!preparedManifest.isFile()) throw new Error('Prepared skill copy is invalid')
+    } else {
+      // Use an absolute source so the junction/symlink remains valid regardless of Agent cwd.
+      await symlink(source, prepared, 'junction')
+      const [preparedReal, sourceReal] = await Promise.all([realpath(prepared), realpath(source)])
+      if (normalize(preparedReal).toLowerCase() !== normalize(sourceReal).toLowerCase()) {
+        throw new Error('Prepared skill link points to an unexpected location')
+      }
+    }
+    return await replacePreparedPath(prepared, target)
+  } catch (error) {
+    await removePathNoFollow(prepared).catch(() => {})
+    throw error
+  }
+}
+
+/** Synchronize one skill atomically and remove the retained backup after commit. */
 async function syncSkill(
   storeDir: string,
   dirName: string,
   adapter: AgentAdapter,
   mode: SkillSyncMode
 ): Promise<void> {
-  const source = join(storeDir, dirName)
-  if (!existsSync(join(source, 'SKILL.md'))) {
-    throw new Error(`技能 ${dirName} 缺少 SKILL.md`)
-  }
-  const target = join(adapter.skillsDir, dirName)
-  await removeSyncTarget(target)
-  await mkdir(adapter.skillsDir, { recursive: true })
-  if (mode === 'copy') {
-    await cp(source, target, { recursive: true })
-  } else {
-    // junction：Windows 下无需管理员权限的目录链接，其他平台等同目录 symlink
-    await symlink(source, target, 'junction')
-  }
+  const swap = await stageSkillSync(storeDir, dirName, adapter, mode)
+  await swap.finalize()
 }
 
 /** 列出中央仓库全部技能及各自已同步到的 Agent */
@@ -330,7 +460,6 @@ export async function resyncSkills(mode: SkillSyncMode): Promise<void> {
   for (const skill of skills) {
     for (const agentId of skill.agents) {
       const adapter = getAdapter(agentId)
-      await removeSyncTarget(join(adapter.skillsDir, skill.dir))
       await syncSkill(dir, skill.dir, adapter, mode)
     }
   }
@@ -354,7 +483,6 @@ export async function migrateSkillsDir(newDir: string): Promise<string> {
     // 软链接需改指新位置；复制模式的副本本就独立，重建一次保持内容一致
     for (const agentId of skill.agents) {
       const adapter = getAdapter(agentId)
-      await removeSyncTarget(join(adapter.skillsDir, skill.dir))
       await syncSkill(target, skill.dir, adapter, mode)
     }
   }
@@ -474,41 +602,54 @@ export async function installSkills(
 ): Promise<string[]> {
   if (paths.length === 0) return []
   const entries = await downloadRepoZip(repo, branch)
-  // zipball 顶层是 `owner-repo-sha/` 目录
   const rootPrefix = entries[0]?.entryName.split('/')[0] ?? ''
   const storeDir = await getSkillsDir()
-  const meta = await readMeta(storeDir)
+  const nextMeta = { ...(await readMeta(storeDir)) }
   const installed: string[] = []
-  for (const path of paths) {
-    const dirName = path === '' ? repo.split('/')[1] : path.split('/').pop()!
-    assertDirName(dirName)
-    const prefix = path === '' ? `${rootPrefix}/` : `${rootPrefix}/${path}/`
-    const files = entries.filter((e) => !e.isDirectory && e.entryName.startsWith(prefix))
-    if (!files.some((e) => e.entryName === `${prefix}SKILL.md`)) {
-      throw new Error(`${path || repo} 下未找到 SKILL.md`)
+  const names = new Set<string>()
+  const swaps: AtomicPathSwap[] = []
+  const preparedPaths: string[] = []
+  let committed = false
+
+  try {
+    for (const path of paths) {
+      const dirName = path === '' ? repo.split('/')[1] : path.split('/').pop()!
+      assertDirName(dirName)
+      if (names.has(dirName)) throw new Error(`Duplicate skill directory name: ${dirName}`)
+      names.add(dirName)
+
+      const prefix = path === '' ? `${rootPrefix}/` : `${rootPrefix}/${path}/`
+      const prepared = await prepareSkillDirectory(storeDir, dirName, entries, prefix)
+      preparedPaths.push(prepared.path)
+      swaps.push(await replacePreparedPath(prepared.path, resolve(storeDir, dirName)))
+
+      nextMeta[dirName] = {
+        repo,
+        branch,
+        path,
+        contentHash: prepared.contentHash,
+        installedAt: new Date().toISOString()
+      }
+      installed.push(dirName)
     }
-    const targetDir = join(storeDir, dirName)
-    await rm(targetDir, { recursive: true, force: true })
-    for (const entry of files) {
-      const rel = entry.entryName.slice(prefix.length)
-      // 防 zip-slip：相对路径不允许出现 ..
-      if (!rel || rel.split('/').includes('..')) continue
-      const dest = join(targetDir, rel)
-      await mkdir(dirname(dest), { recursive: true })
-      await writeFile(dest, entry.getData())
+
+    await writeMeta(storeDir, nextMeta)
+    committed = true
+    await finalizeSwaps(swaps)
+    return installed
+  } catch (error) {
+    if (!committed) {
+      const rollbackErrors = await rollbackSwaps(swaps)
+      if (rollbackErrors.length > 0) {
+        throw new Error(
+          `Skill installation failed and rollback was incomplete: ${errorMessage(error)}; ${rollbackErrors.join('; ')}`
+        )
+      }
     }
-    meta[dirName] = {
-      repo,
-      branch,
-      path,
-      contentHash: hashZipSkillDir(entries, prefix),
-      installedAt: new Date().toISOString()
-    }
-    installed.push(dirName)
+    throw error
+  } finally {
+    await Promise.all(preparedPaths.map((path) => removePathNoFollow(path).catch(() => {})))
   }
-  await writeMeta(storeDir, meta)
-  // 安装只入库，不主动同步到任何 Agent；用户在「已安装」列表里按需手动开启同步
-  return installed
 }
 
 /**
@@ -572,52 +713,62 @@ export async function updateSkill(dirName: string): Promise<void> {
   assertDirName(dirName)
   const storeDir = await getSkillsDir()
   const meta = await readMeta(storeDir)
-  const m = meta[dirName]
-  if (!m?.repo) throw new Error('该技能没有来源仓库信息，无法更新')
-  const branch = m.branch?.trim() || 'main'
+  const currentMeta = meta[dirName]
+  if (!currentMeta?.repo) throw new Error('This skill has no source repository and cannot update')
+  const branch = currentMeta.branch?.trim() || 'main'
 
-  const entries = await downloadRepoZip(m.repo, branch)
+  const entries = await downloadRepoZip(currentMeta.repo, branch)
   const rootPrefix = entries[0]?.entryName.split('/')[0] ?? ''
-  const prefix = findSkillPrefix(entries, rootPrefix, dirName, m.path)
-  if (!prefix) throw new Error(`在 ${m.repo} 中未找到技能 ${dirName}`)
-  const files = entries.filter((e) => !e.isDirectory && e.entryName.startsWith(prefix))
-  if (!files.some((e) => e.entryName === `${prefix}SKILL.md`)) {
-    throw new Error(`${m.repo} 下未找到 SKILL.md`)
-  }
+  const prefix = findSkillPrefix(entries, rootPrefix, dirName, currentMeta.path)
+  if (!prefix) throw new Error(`Skill ${dirName} was not found in ${currentMeta.repo}`)
 
-  // 记录当前已同步的 Agent，覆盖后按原样重建
   const syncedAgents: AgentId[] = []
   for (const adapter of listAdapters()) {
     if (await isSyncedTo(storeDir, dirName, adapter)) syncedAgents.push(adapter.id)
   }
 
-  // 覆盖本地目录
-  const targetDir = join(storeDir, dirName)
-  await rm(targetDir, { recursive: true, force: true })
-  for (const entry of files) {
-    const rel = entry.entryName.slice(prefix.length)
-    if (!rel || rel.split('/').includes('..')) continue
-    const dest = join(targetDir, rel)
-    await mkdir(dirname(dest), { recursive: true })
-    await writeFile(dest, entry.getData())
-  }
+  const prepared = await prepareSkillDirectory(storeDir, dirName, entries, prefix)
+  const swaps: AtomicPathSwap[] = []
+  let committed = false
+  try {
+    swaps.push(await replacePreparedPath(prepared.path, resolve(storeDir, dirName)))
 
-  meta[dirName] = {
-    repo: m.repo,
-    branch,
-    path: m.path,
-    contentHash: hashZipSkillDir(entries, prefix),
-    installedAt: m.installedAt || new Date().toISOString()
-  }
-  await writeMeta(storeDir, meta)
-
-  // 重建原有同步：copy 模式必须重新复制，junction 一并刷新更稳妥
-  const mode = await getSyncMode()
-  for (const agentId of syncedAgents) {
-    try {
-      await syncSkill(storeDir, dirName, getAdapter(agentId), mode)
-    } catch {
-      // 忽略：技能已更新，同步可在列表页手动重试
+    const mode = await getSyncMode()
+    for (const agentId of syncedAgents) {
+      try {
+        swaps.push(await stageSkillSync(storeDir, dirName, getAdapter(agentId), mode))
+      } catch (error) {
+        throw new Error(`Failed to synchronize updated skill to ${agentId}: ${errorMessage(error)}`)
+      }
     }
+
+    const nextMeta = {
+      ...meta,
+      [dirName]: {
+        repo: currentMeta.repo,
+        branch,
+        path: currentMeta.path,
+        contentHash: prepared.contentHash,
+        installedAt: currentMeta.installedAt || new Date().toISOString()
+      }
+    }
+    await writeMeta(storeDir, nextMeta)
+    committed = true
+    await finalizeSwaps(swaps)
+  } catch (error) {
+    if (!committed) {
+      const rollbackErrors = await rollbackSwaps(swaps)
+      if (rollbackErrors.length > 0) {
+        throw new Error(
+          `Skill ${dirName} update failed and rollback was incomplete: ${errorMessage(error)}; ${rollbackErrors.join('; ')}`
+        )
+      }
+      throw new Error(
+        `Skill ${dirName} update failed; the previous version and sync targets were restored: ${errorMessage(error)}`
+      )
+    }
+    throw error
+  } finally {
+    await removePathNoFollow(prepared.path).catch(() => {})
   }
 }

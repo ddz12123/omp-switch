@@ -1,7 +1,7 @@
 import { existsSync } from 'fs'
-import { open, readdir, readFile, rm, rmdir, stat } from 'fs/promises'
+import { lstat, open, readdir, readFile, realpath, rm, rmdir, stat } from 'fs/promises'
 import { homedir } from 'os'
-import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from 'path'
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'path'
 import { parseDocument } from 'yaml'
 import type { SessionMeta, SessionRaw, SessionRootInfo, SessionRootKind } from '../shared/types'
 import { readAppConfig } from './appConfig'
@@ -122,21 +122,72 @@ export async function resolveSessionRoots(): Promise<SessionRootInfo[]> {
   return roots
 }
 
-/** 目标路径必须落在某个已解析的会话根目录内，防止目录穿越 */
-function assertInside(roots: SessionRootInfo[], target: string): string {
-  const resolved = normalizeId(target)
-  const ok = roots.some((root) => {
-    const rel = relative(root.id, resolved)
-    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
-  })
-  if (!ok) throw new Error(`拒绝访问会话目录之外的路径：${target}`)
-  return resolved
+/** Compare canonical paths so a symlinked parent cannot bypass containment checks. */
+function isInsideRealPath(root: string, target: string): boolean {
+  const rel = relative(root, target)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
 }
 
-/** 校验单个会话路径合法并返回其规范化绝对路径 */
+/**
+ * Resolve an existing session root. An explicitly configured root may itself be a symlink or
+ * junction, but its canonical destination must be a directory.
+ */
+async function resolveRealSessionRoot(root: SessionRootInfo): Promise<string | null> {
+  try {
+    const lexicalStat = await lstat(root.path)
+    if (!lexicalStat.isDirectory() && !lexicalStat.isSymbolicLink()) return null
+    const resolved = normalizeId(await realpath(root.path))
+    const resolvedStat = await stat(resolved)
+    return resolvedStat.isDirectory() ? resolved : null
+  } catch {
+    return null
+  }
+}
+
+/** Require an existing regular .jsonl file inside one of the canonical session roots. */
+async function assertSessionPathInRoots(roots: SessionRootInfo[], target: string): Promise<string> {
+  const lexicalTarget = normalizeId(target)
+  if (!/\.jsonl$/i.test(lexicalTarget)) {
+    throw new Error(`Only regular .jsonl session files are allowed: ${target}`)
+  }
+
+  const targetStat = await lstat(lexicalTarget)
+  // lstat does not follow the final symlink, so symbolic links and junctions are rejected here.
+  if (!targetStat.isFile()) throw new Error(`Session path is not a regular file: ${target}`)
+  const realTarget = normalizeId(await realpath(lexicalTarget))
+
+  for (const root of roots) {
+    const realRoot = await resolveRealSessionRoot(root)
+    if (realRoot && isInsideRealPath(realRoot, realTarget)) return realTarget
+  }
+  throw new Error(`Refusing to access a path outside the session roots: ${target}`)
+}
+
+/** Validate one session file and return its canonical absolute path. */
 async function assertSessionPath(target: string): Promise<string> {
-  const roots = await resolveSessionRoots()
-  return assertInside(roots, target)
+  return assertSessionPathInRoots(await resolveSessionRoots(), target)
+}
+
+/** A recursively removed sibling log directory must be a real in-root directory, never a link. */
+async function resolveSafeSessionLogDir(
+  roots: SessionRootInfo[],
+  target: string
+): Promise<string | null> {
+  try {
+    const lexicalTarget = normalizeId(target)
+    const targetStat = await lstat(lexicalTarget)
+    if (!targetStat.isDirectory()) return null
+    const realTarget = normalizeId(await realpath(lexicalTarget))
+    for (const root of roots) {
+      const realRoot = await resolveRealSessionRoot(root)
+      if (realRoot && isInsideRealPath(realRoot, realTarget) && realRoot !== realTarget) {
+        return realTarget
+      }
+    }
+  } catch {
+    // Missing or unsafe sibling log directories are intentionally left untouched.
+  }
+  return null
 }
 
 /** 读取文件前若干字节（用于提取头部元信息或截断查看） */
@@ -212,8 +263,9 @@ export async function listSessions(): Promise<SessionMeta[]> {
     const files = await collectJsonl(root.path)
     for (const filePath of files) {
       try {
-        const st = await stat(filePath)
-        const meta = parseHeadMeta(await readHead(filePath, HEAD_BYTES))
+        const resolved = await assertSessionPathInRoots([root], filePath)
+        const st = await lstat(resolved)
+        const meta = parseHeadMeta(await readHead(resolved, HEAD_BYTES))
         const fileBase = basename(filePath).replace(/\.jsonl$/i, '')
         result.push({
           rootId: root.id,
@@ -238,7 +290,8 @@ export async function listSessions(): Promise<SessionMeta[]> {
 /** 读取单个会话文件原始文本（供只读查看），过大截断 */
 export async function readSessionRaw(filePath: string): Promise<SessionRaw> {
   const resolved = await assertSessionPath(filePath)
-  const st = await stat(resolved)
+  const st = await lstat(resolved)
+  if (!st.isFile()) throw new Error(`Session path is not a regular file: ${filePath}`)
   if (st.size > RAW_MAX_BYTES) {
     return { filePath: resolved, content: await readHead(resolved, RAW_MAX_BYTES), truncated: true }
   }
@@ -253,23 +306,25 @@ export async function readSessionRaw(filePath: string): Promise<SessionRaw> {
  */
 export async function deleteSessions(filePaths: string[]): Promise<{ deleted: number }> {
   const roots = await resolveSessionRoots()
-  const rootIds = new Set(roots.map((r) => r.id))
+  const rootIds = new Set(
+    (await Promise.all(roots.map(resolveRealSessionRoot))).filter(
+      (root): root is string => root !== null
+    )
+  )
   let deleted = 0
   for (const filePath of filePaths) {
-    const resolved = assertInside(roots, filePath)
-    if (!/\.jsonl$/i.test(resolved)) continue
+    const resolved = await assertSessionPathInRoots(roots, filePath)
     await rm(resolved, { force: true })
 
-    const logDir = resolved.replace(/\.jsonl$/i, '')
-    const logStat = await stat(logDir).catch(() => null)
-    if (logStat?.isDirectory()) await rm(logDir, { recursive: true, force: true })
+    const logDir = await resolveSafeSessionLogDir(roots, resolved.replace(/\.jsonl$/i, ''))
+    if (logDir) await rm(logDir, { recursive: true, force: true })
 
     deleted++
 
     const parent = dirname(resolved)
     if (!rootIds.has(normalizeId(parent))) {
       const remaining = await readdir(parent).catch(() => null)
-      // rmdir 才能删目录（rm 无 recursive 删目录会抛 EISDIR）；仅在确实为空时删，失败忽略
+      // rmdir only removes an empty parent and never recursively removes a session root.
       if (remaining && remaining.length === 0) await rmdir(parent).catch(() => {})
     }
   }

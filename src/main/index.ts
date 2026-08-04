@@ -1,10 +1,16 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIpc } from './ipc'
 import { setupTray } from './tray'
 import { setupUpdater } from './updater'
+import {
+  configureTrustedRendererUrl,
+  isAllowedExternalUrl,
+  isTrustedRendererUrl
+} from './lib/security'
 
 let mainWindow: BrowserWindow | null = null
 /** app.quit() 流程中（托盘退出/渲染层确认退出），放行窗口 close */
@@ -27,7 +33,9 @@ function createWindow(): void {
     icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true
     }
   })
 
@@ -47,15 +55,32 @@ function createWindow(): void {
     mainWindow = null
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+  const rendererFile = join(__dirname, '../renderer/index.html')
+  const rendererUrl =
+    is.dev && process.env['ELECTRON_RENDERER_URL']
+      ? process.env['ELECTRON_RENDERER_URL']
+      : pathToFileURL(rendererFile).toString()
+  configureTrustedRendererUrl(rendererUrl)
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) void shell.openExternal(url).catch(() => {})
     return { action: 'deny' }
   })
 
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isTrustedRendererUrl(url)) event.preventDefault()
+  })
+
+  // This application does not need camera, microphone, notifications, geolocation, or devices.
+  mainWindow.webContents.session.setPermissionCheckHandler(() => false)
+  mainWindow.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => {
+    callback(false)
+  })
+
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    void mainWindow.loadURL(rendererUrl)
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    void mainWindow.loadFile(rendererFile)
   }
 }
 
