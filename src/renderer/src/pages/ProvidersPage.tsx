@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { ExternalLink, FileCode, FolderOpen, Pencil, Play, Plus, Trash2 } from 'lucide-react'
+import { Copy, ExternalLink, FileCode, FolderOpen, Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import type { Provider } from '@shared/types'
 import { useApp } from '../stores/app'
-import { getWebsite, removeWebsite } from '../lib/websites'
+import { getWebsite, removeWebsite, setWebsite } from '../lib/websites'
 import { cn } from '../lib/utils'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
@@ -62,6 +62,28 @@ export default function ProvidersPage(): React.JSX.Element {
     delete next[name]
     const ok = await saveProviders(next, `已删除供应商「${name}」`)
     if (ok) removeWebsite(agent, name)
+  }
+
+  /**
+   * 复制供应商：深拷贝原 provider，名字加 -copy 后缀，撞名则递增 -2/-3...
+   * 官网一起复制过来（不然复制完就丢了）。saveProviders 失败时跳过 website，
+   * 避免给一个不存在的供应商挂上孤立记录——对齐 confirmDelete 的处理。
+   */
+  const copyProvider = async (name: string): Promise<void> => {
+    const source = providers[name]
+    if (!source) return
+    const base = `${name}-copy`
+    let newName = base
+    let suffix = 2
+    while (newName in providers) {
+      newName = `${base}-${suffix}`
+      suffix += 1
+    }
+    const cloned = JSON.parse(JSON.stringify(source)) as Provider
+    const next = { ...providers, [newName]: cloned }
+    const website = getWebsite(agent, name)
+    const ok = await saveProviders(next, `已复制供应商「${name}」 → 「${newName}」`)
+    if (ok && website) setWebsite(agent, newName, website)
   }
 
   const handleSave = async (name: string, provider: Provider): Promise<boolean> => {
@@ -190,6 +212,15 @@ export default function ProvidersPage(): React.JSX.Element {
                     onClick={() => openEdit(name)}
                   >
                     <Pencil />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-foreground size-9"
+                    title="复制"
+                    onClick={() => void copyProvider(name)}
+                  >
+                    <Copy />
                   </Button>
                   <Button
                     variant="ghost"
