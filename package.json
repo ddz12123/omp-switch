@@ -1,6 +1,6 @@
 {
   "name": "omp-switch",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "packageManager": "pnpm@11.18.0",
   "engines": {
     "node": ">=22.13"
@@ -57,6 +57,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "cross-spawn": "^7.0.6",
     "electron-updater": "^6.3.9",
     "lucide-react": "^0.545.0",
     "monaco-editor": "^0.56.0",
@@ -73,6 +74,7 @@
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/adm-zip": "^0.5.8",
+    "@types/cross-spawn": "^6.0.6",
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

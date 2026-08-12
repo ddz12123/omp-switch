@@ -7,11 +7,13 @@ import { cn } from './lib/utils'
 import { Button } from './components/ui/button'
 import { Toaster } from './components/ui/sonner'
 import CloseConfirmDialog from './components/CloseConfirmDialog'
+import appIcon from './assets/app-icon.png'
 
 const ProvidersPage = lazy(() => import('./pages/ProvidersPage'))
 const SwitchPage = lazy(() => import('./pages/SwitchPage'))
 const ConfigPage = lazy(() => import('./pages/ConfigPage'))
 const RulesPage = lazy(() => import('./pages/RulesPage'))
+const PiPluginsPage = lazy(() => import('./pages/PiPluginsPage'))
 const SkillsPage = lazy(() => import('./pages/SkillsPage'))
 const McpPage = lazy(() => import('./pages/McpPage'))
 const SessionsPage = lazy(() => import('./pages/SessionsPage'))
@@ -114,7 +116,22 @@ export default function App(): React.JSX.Element {
         <>
           {/* 顶栏：标题 + Agent 切换 + 共用页导航 */}
           <header className="border-border/60 flex h-14 shrink-0 items-center gap-5 border-b px-5">
-            <h1 className="text-sm font-semibold tracking-tight">OMP Switch</h1>
+            <div className="flex shrink-0 items-center gap-2.5" aria-label="OMP Switch">
+              <img
+                src={appIcon}
+                alt=""
+                className="size-8 rounded-[10px] shadow-sm ring-1 ring-black/10 dark:ring-white/10"
+                draggable={false}
+              />
+              <div className="flex flex-col justify-center leading-none">
+                <div className="text-[13px] font-semibold tracking-[-0.02em]">
+                  OMP <span className="text-primary">SWITCH</span>
+                </div>
+                <div className="text-muted-foreground mt-1 text-[8px] font-medium tracking-[0.2em] uppercase">
+                  Agent control
+                </div>
+              </div>
+            </div>
             {/* 分段控件：滑块滑动到目标位置，而不是两个背景瞬间交换 */}
             <div className="bg-muted relative flex rounded-[10px] p-1" aria-label="选择 Agent">
               <div
@@ -217,7 +234,9 @@ export default function App(): React.JSX.Element {
                 <div
                   className={cn(
                     'min-h-0 flex-1',
-                    page === 'providers' ? 'overflow-hidden' : 'overflow-y-auto pb-6'
+                    page === 'providers' || page === 'plugins'
+                      ? 'overflow-hidden'
+                      : 'overflow-y-auto pb-6'
                   )}
                 >
                   <Suspense fallback={<PageFallback />}>
@@ -225,6 +244,7 @@ export default function App(): React.JSX.Element {
                     {page === 'switch' && <SwitchPage />}
                     {page === 'config' && <ConfigPage />}
                     {page === 'rules' && <RulesPage />}
+                    {page === 'plugins' && <PiPluginsPage />}
                   </Suspense>
                 </div>
               </div>

@@ -19,6 +19,7 @@
   - 思考等级支持 `off / minimal / low / medium / high / xhigh / max`。
 - **Skills** — 从 GitHub 仓库或 [skills.sh](https://skills.sh) 浏览、安装、卸载技能；
   中央仓库统一存放，按需以**软链接**（省空间、实时生效）或**文件复制**分发到各 Agent。
+- **Pi 插件（Packages）** — 管理 Pi 全局 npm / Git / 本地 Package；支持启停、更新、卸载，并检查自动发现的本地扩展。
 - **MCP** — 可视化管理 `mcp.json` 中的 MCP Server。
 - **会话（Sessions）** — 浏览、搜索、删除会话；自动汇总多个会话根目录
   （CLI 默认目录、`PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR` 环境变量、
@@ -65,13 +66,13 @@ pnpm run build:linux
 
 ## 🛠️ 开发脚本
 
-| 命令 | 说明 |
-| --- | --- |
-| `pnpm run dev` | 启动 electron-vite 开发模式（热重载） |
-| `pnpm run lint` | ESLint 检查 |
-| `pnpm run typecheck` | 类型检查（主进程 + 渲染进程） |
-| `pnpm run format` | Prettier 格式化 |
-| `pnpm run build` | 类型检查 + 构建 |
+| 命令                 | 说明                                  |
+| -------------------- | ------------------------------------- |
+| `pnpm run dev`       | 启动 electron-vite 开发模式（热重载） |
+| `pnpm run lint`      | ESLint 检查                           |
+| `pnpm run typecheck` | 类型检查（主进程 + 渲染进程）         |
+| `pnpm run format`    | Prettier 格式化                       |
+| `pnpm run build`     | 类型检查 + 构建                       |
 
 ## 🧩 技术栈
 
@@ -90,7 +91,7 @@ src/
 │   ├── agents/      # pi / omp 适配器（路径探测、读写、格式保真）
 │   ├── appConfig.ts # 应用自身配置
 │   ├── sessions.ts  # 会话根目录探测与会话读写
-│   ├── skills.ts    # Skills 中央仓库与分发
+│   ├── piPlugins.ts   # Pi Packages 与本地扩展管理
 │   ├── mcp.ts       # MCP 配置读写
 │   └── ipc.ts       # IPC 通道注册
 ├── preload/         # 预加载：contextBridge 白名单

@@ -225,6 +225,94 @@ export interface SkillsShSkill {
   installs: number
 }
 
+/** Pi 原生 Package 的来源类型。 */
+export type PiPluginSourceKind = 'npm' | 'git' | 'local'
+
+/** Package 资源加载状态；custom 表示用户配置了精细资源过滤。 */
+export type PiPluginLoadState = 'enabled' | 'disabled' | 'custom'
+
+/** Pi Package 可声明的四类资源。 */
+export interface PiPluginResources {
+  extensions: string[]
+  skills: string[]
+  prompts: string[]
+  themes: string[]
+}
+
+/** 单个 Package 的更新状态。 */
+export type PiPluginUpdateState =
+  'unknown' | 'current' | 'available' | 'pinned' | 'unsupported' | 'error'
+
+/** npm Registry 返回的可安装 Pi Package 搜索结果。 */
+export interface PiPluginSearchItem {
+  name: string
+  version: string
+  description?: string
+  publisher?: string
+  license?: string
+  updatedAt?: string
+  weeklyDownloads: number
+  homepage?: string
+  repository?: string
+}
+
+export interface PiPluginSearchResult {
+  items: PiPluginSearchItem[]
+  total: number
+}
+
+/** settings.json 中一个已配置的 Pi Package 及其本地元数据。 */
+export interface PiPluginInfo {
+  source: string
+  sourceKind: PiPluginSourceKind
+  loadState: PiPluginLoadState
+  pinned: boolean
+  installed: boolean
+  installedPath?: string
+  name: string
+  version?: string
+  latestVersion?: string
+  description?: string
+  author?: string
+  license?: string
+  homepage?: string
+  repository?: string
+  resources: PiPluginResources
+  updateState: PiPluginUpdateState
+  updateError?: string
+}
+
+/** 自动发现目录或 settings.extensions 中的本地扩展。 */
+export interface PiLocalExtensionInfo {
+  path: string
+  name: string
+  origin: 'auto' | 'settings'
+  valid: boolean
+  entryPath?: string
+  issue?: string
+}
+
+/** Pi 插件页的完整读取结果。 */
+export interface PiPluginsListResult {
+  settingsPath: string
+  agentDir: string
+  cliInstalled: boolean
+  plugins: PiPluginInfo[]
+  localExtensions: PiLocalExtensionInfo[]
+  warnings: string[]
+}
+
+export type PiPluginOperationKind = 'install' | 'update' | 'update-all' | 'remove' | 'toggle'
+
+/** 主进程执行 Pi 包管理命令时推送的进度。 */
+export interface PiPluginOperationEvent {
+  kind: PiPluginOperationKind
+  source?: string
+  status: 'started' | 'output' | 'completed' | 'failed'
+  message: string
+  stream?: 'stdout' | 'stderr'
+}
+
 /** OMP 原生支持的 MCP 传输类型。 */
 export type McpTransport = 'stdio' | 'http' | 'sse'
 

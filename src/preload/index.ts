@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { PreloadApi } from '../shared/api'
-import type { AgentId, UpdaterEvent } from '../shared/types'
+import type { AgentId, PiPluginOperationEvent, UpdaterEvent } from '../shared/types'
 
 // 渲染进程可用的白名单 API，全部经 IPC 走主进程
 const api: PreloadApi = {
@@ -29,6 +29,25 @@ const api: PreloadApi = {
   showAppConfigInFolder: () => ipcRenderer.invoke('app-config:show-in-folder'),
   changeAppConfigDir: () => ipcRenderer.invoke('app-config:change-dir'),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
+  listPiPlugins: (checkUpdates) => ipcRenderer.invoke('pi-plugins:list', checkUpdates),
+  searchPiPlugins: (query) => ipcRenderer.invoke('pi-plugins:search', query),
+  installPiPlugin: (source) => ipcRenderer.invoke('pi-plugins:install', source),
+  updatePiPlugin: (source) => ipcRenderer.invoke('pi-plugins:update', source),
+  updateAllPiPlugins: () => ipcRenderer.invoke('pi-plugins:update-all'),
+  removePiPlugin: (source) => ipcRenderer.invoke('pi-plugins:remove', source),
+  setPiPluginEnabled: (source, enabled) =>
+    ipcRenderer.invoke('pi-plugins:set-enabled', source, enabled),
+  pickPiPluginPath: () => ipcRenderer.invoke('pi-plugins:pick-path'),
+  showPiPluginInFolder: (source) => ipcRenderer.invoke('pi-plugins:show-in-folder', source),
+  showPiLocalExtensionInFolder: (path) =>
+    ipcRenderer.invoke('pi-plugins:show-local-in-folder', path),
+  showPiPluginsConfig: () => ipcRenderer.invoke('pi-plugins:show-config'),
+  onPiPluginOperation: (callback) => {
+    const listener = (_e: Electron.IpcRendererEvent, event: PiPluginOperationEvent): void =>
+      callback(event)
+    ipcRenderer.on('pi-plugins:operation', listener)
+    return () => ipcRenderer.removeListener('pi-plugins:operation', listener)
+  },
   listSkills: () => ipcRenderer.invoke('skills:list'),
   setSkillSync: (dir, agentId, enabled) => ipcRenderer.invoke('skills:sync', dir, agentId, enabled),
   deleteSkill: (dir) => ipcRenderer.invoke('skills:delete', dir),

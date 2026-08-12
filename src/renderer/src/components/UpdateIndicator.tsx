@@ -1,17 +1,29 @@
-import { Download, RotateCw, Sparkles } from 'lucide-react'
+import { Download, Loader2, RotateCw, Sparkles } from 'lucide-react'
 import { useApp } from '../stores/app'
 import { Button } from './ui/button'
 
 /**
  * 首页顶栏的应用更新角标（挂在「OMP Switch」标题旁）：
+ * - checking：低干扰地提示正在检查
  * - available：琥珀色「可更新」图标，点击开始下载
  * - downloading：下载图标 + 圆圈进度
  * - downloaded：更新完成，变成「更新并重启」按钮
- * 其余状态（idle / checking / not-available / dev / error）不显示，避免打扰。
+ * 其余状态（idle / not-available / dev / error）不显示，避免打扰。
  */
 export default function UpdateIndicator(): React.JSX.Element | null {
   const { updater, downloadUpdate, installUpdate } = useApp()
   switch (updater.status) {
+    case 'checking':
+      return (
+        <span
+          className="text-muted-foreground flex shrink-0 items-center gap-1 text-[11px]"
+          role="status"
+          aria-live="polite"
+        >
+          <Loader2 className="size-3 animate-spin" />
+          检查更新…
+        </span>
+      )
     case 'available':
       return (
         <button

@@ -16,7 +16,15 @@ import { applyTheme, getStoredTheme, storeTheme, type Theme } from '../lib/theme
 import { getCloseBehavior, storeCloseBehavior, type CloseBehavior } from '../lib/closeBehavior'
 
 export type PageId =
-  'providers' | 'switch' | 'config' | 'rules' | 'skills' | 'mcp' | 'sessions' | 'settings'
+  | 'providers'
+  | 'switch'
+  | 'config'
+  | 'rules'
+  | 'plugins'
+  | 'skills'
+  | 'mcp'
+  | 'sessions'
+  | 'settings'
 
 /** 全屏「全局页」：与 Agent 无关，进入后隐藏侧边栏与切换器，仅保留返回按钮 */
 export const GLOBAL_PAGES: PageId[] = ['skills', 'mcp', 'sessions', 'settings']
@@ -362,7 +370,14 @@ export const useApp = create<AppState>((set, get) => ({
 
   setAgent: (agent) => {
     if (agent === get().agent) return
-    set({ agent, providers: {}, switchState: { roles: {} }, error: null })
+    const leavingPiPlugins = agent !== 'pi' && get().page === 'plugins'
+    set({
+      agent,
+      providers: {},
+      switchState: { roles: {} },
+      error: null,
+      ...(leavingPiPlugins ? { page: 'providers' as const, returnPage: 'providers' as const } : {})
+    })
     void get().reload()
   },
 

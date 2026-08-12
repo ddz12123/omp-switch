@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { mkdir } from 'fs/promises'
+import type { IpcMainInvokeEvent } from 'electron'
+import { mkdir, stat } from 'fs/promises'
 import { existsSync } from 'fs'
 import { dirname } from 'path'
 import { parseDocument } from 'yaml'
@@ -56,6 +57,18 @@ import {
 import { readTextFile, writeTextFileSafe } from './lib/fileio'
 import { checkForUpdates, downloadUpdate, quitAndInstall } from './updater'
 import { assertTrustedIpcSender, isAllowedExternalUrl } from './lib/security'
+import {
+  getPiLocalExtensionPath,
+  getPiPluginPath,
+  installPiPlugin,
+  listPiPlugins,
+  removePiPlugin,
+  searchPiPlugins,
+  setPiPluginEnabled,
+  updateAllPiPlugins,
+  updatePiPlugin,
+  type PiPluginEventSink
+} from './piPlugins'
 
 type InvokeHandler = Parameters<typeof ipcMain.handle>[1]
 
@@ -64,6 +77,22 @@ function handle(channel: string, listener: InvokeHandler): void {
     assertTrustedIpcSender(event)
     return listener(event, ...args)
   })
+}
+
+function piPluginEventSink(event: IpcMainInvokeEvent): PiPluginEventSink {
+  return (payload) => {
+    if (!event.sender.isDestroyed()) event.sender.send('pi-plugins:operation', payload)
+  }
+}
+
+async function revealPath(path: string): Promise<void> {
+  const info = await stat(path)
+  if (info.isDirectory()) {
+    const error = await shell.openPath(path)
+    if (error) throw new Error(`无法打开目录：${error}`)
+  } else {
+    shell.showItemInFolder(path)
+  }
 }
 /** 根据类别取原始配置文件路径 */
 function rawConfigPath(agentId: AgentId, kind: ConfigFileKind): string {
@@ -225,6 +254,50 @@ export function registerIpc(refreshTray: () => void): void {
       : await dialog.showOpenDialog(options)
     if (result.canceled || result.filePaths.length === 0) return null
     return changeConfigDir(result.filePaths[0])
+  })
+
+  handle('pi-plugins:list', (_e, checkUpdates?: boolean) => listPiPlugins(checkUpdates === true))
+
+  handle('pi-plugins:search', (_e, query: string) => searchPiPlugins(query))
+
+  handle('pi-plugins:install', (e, source: string) => installPiPlugin(source, piPluginEventSink(e)))
+
+  handle('pi-plugins:update', (e, source: string) => updatePiPlugin(source, piPluginEventSink(e)))
+
+  handle('pi-plugins:update-all', (e) => updateAllPiPlugins(piPluginEventSink(e)))
+
+  handle('pi-plugins:remove', (e, source: string) => removePiPlugin(source, piPluginEventSink(e)))
+
+  handle('pi-plugins:set-enabled', (e, source: string, enabled: boolean) => {
+    if (typeof enabled !== 'boolean') throw new Error('enabled 必须是布尔值')
+    return setPiPluginEnabled(source, enabled, piPluginEventSink(e))
+  })
+
+  handle('pi-plugins:pick-path', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options = {
+      title: '选择本地 Pi Package 或扩展文件',
+      properties: ['openFile', 'openDirectory'] as ('openFile' | 'openDirectory')[]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+
+  handle('pi-plugins:show-in-folder', async (_e, source: string) => {
+    await revealPath(await getPiPluginPath(source))
+  })
+
+  handle('pi-plugins:show-local-in-folder', async (_e, path: string) => {
+    await revealPath(await getPiLocalExtensionPath(path))
+  })
+
+  handle('pi-plugins:show-config', async () => {
+    const path = getAdapter('pi').switchPath
+    await mkdir(dirname(path), { recursive: true })
+    if (existsSync(path)) shell.showItemInFolder(path)
+    else await shell.openPath(dirname(path))
   })
 
   handle('skills:list', () => listSkills())

@@ -1,5 +1,6 @@
-import { ArrowLeftRight, ScrollText, Server, Settings, ToggleLeft } from 'lucide-react'
-import { useApp, type PageId } from '../stores/app'
+import { ArrowLeftRight, Blocks, ScrollText, Server, Settings, ToggleLeft } from 'lucide-react'
+import { useApp } from '../stores/app'
+import type { PageId } from '../stores/app'
 import UpdateIndicator from './UpdateIndicator'
 import { cn } from '../lib/utils'
 
@@ -15,11 +16,12 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'config', label: '全局配置', icon: ToggleLeft },
   { id: 'rules', label: '全局规则', icon: ScrollText }
 ]
+const PI_PLUGIN_ITEM: NavItem = { id: 'plugins', label: '插件管理', icon: Blocks }
 
 const SETTINGS_ITEM: NavItem = { id: 'settings', label: '设置', icon: Settings }
 
 export function Sidebar(): React.JSX.Element {
-  const { page, setPage } = useApp()
+  const { agent, page, setPage } = useApp()
 
   const itemCls = (id: PageId): string =>
     cn(
@@ -53,6 +55,7 @@ export function Sidebar(): React.JSX.Element {
   return (
     <aside className="flex w-48 shrink-0 flex-col gap-1 p-3">
       {NAV_ITEMS.map((item) => renderItem(item))}
+      {agent === 'pi' && renderItem(PI_PLUGIN_ITEM)}
       {/* 更新角标挂在左下角「设置」旁（全局页隐藏侧边栏，设置页内有自己的更新卡片） */}
       <div className="mt-auto">{renderItem(SETTINGS_ITEM, <UpdateIndicator />)}</div>
     </aside>

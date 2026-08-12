@@ -7,6 +7,9 @@ import type {
   ConfigFileKind,
   McpListResult,
   McpSaveRequest,
+  PiPluginOperationEvent,
+  PiPluginSearchResult,
+  PiPluginsListResult,
   ProviderMap,
   RawConfigFile,
   RemoteSkillsResult,
@@ -79,6 +82,30 @@ export interface PreloadApi {
   changeAppConfigDir(): Promise<string | null>
   /** 在系统默认浏览器中打开 http(s) 链接 */
   openExternal(url: string): Promise<void>
+  /** 读取 Pi 全局 Packages 和本地扩展；checkUpdates=true 时同时查询 npm 最新版本。 */
+  listPiPlugins(checkUpdates?: boolean): Promise<PiPluginsListResult>
+  /** 从 npm Registry 搜索带 pi-package 关键词的可安装插件。 */
+  searchPiPlugins(query: string): Promise<PiPluginSearchResult>
+  /** 用 Pi 原生命令安装 npm、Git 或绝对本地路径 Package。 */
+  installPiPlugin(source: string): Promise<void>
+  /** 更新单个未固定版本的 npm/Git Package。 */
+  updatePiPlugin(source: string): Promise<void>
+  /** 更新全部未固定版本的 Package。 */
+  updateAllPiPlugins(): Promise<void>
+  /** 卸载 Package；本地路径只移除配置引用，不删除源文件。 */
+  removePiPlugin(source: string): Promise<void>
+  /** 启停未配置精细资源过滤的 Package。 */
+  setPiPluginEnabled(source: string, enabled: boolean): Promise<void>
+  /** 选择一个本地 Package 文件或目录。 */
+  pickPiPluginPath(): Promise<string | null>
+  /** 在资源管理器中打开 Package 安装位置。 */
+  showPiPluginInFolder(source: string): Promise<void>
+  /** 在资源管理器中显示一个经过重新发现校验的本地扩展。 */
+  showPiLocalExtensionInFolder(path: string): Promise<void>
+  /** 在资源管理器中显示 Pi settings.json。 */
+  showPiPluginsConfig(): Promise<void>
+  /** 订阅 Pi 包管理命令的实时状态和输出。 */
+  onPiPluginOperation(callback: (event: PiPluginOperationEvent) => void): () => void
   /** 列出中央仓库里的技能及各自已同步到的 Agent */
   listSkills(): Promise<SkillsListResult>
   /** 同步 / 取消同步某技能到某 Agent（enabled=true 时按当前同步方式建链或复制） */
