@@ -1,17 +1,62 @@
-import { useState } from 'react'
-import { Copy, ExternalLink, FileCode, FolderOpen, Pencil, Play, Plus, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  BarChart3,
+  Copy,
+  ExternalLink,
+  FileCode,
+  FolderOpen,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Trash2
+} from 'lucide-react'
 import type { Provider } from '@shared/types'
-import { useApp } from '../stores/app'
+import { errorMessage, useApp } from '../stores/app'
 import { getWebsite, removeWebsite, setWebsite } from '../lib/websites'
+import { getUsageEndpoint, removeUsageEndpoint, setUsageEndpoint } from '../lib/usageEndpoints'
+import {
+  fetchUsageQuery,
+  getUsageQuery,
+  removeUsageQuery,
+  setUsageQuery
+} from '../lib/usageQueries'
 import { cn } from '../lib/utils'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 import ProviderDialog from '../components/ProviderDialog'
 import ConfirmDialog from '../components/ConfirmDialog'
 import ConfigFileDialog from '../components/ConfigFileDialog'
+import UsageDialog from '../components/UsageDialog'
+
+interface UsageDisplay {
+  loading: boolean
+  updatedAt?: number
+  extracted?: unknown
+  error?: string
+}
+
+function balanceOf(extracted: unknown): { remaining: string; unit: string } | null {
+  if (!extracted || typeof extracted !== 'object' || Array.isArray(extracted)) return null
+  const value = extracted as Record<string, unknown>
+  if (value.isValid === false) return null
+  const remaining = value.remaining
+  if (typeof remaining !== 'number' && typeof remaining !== 'string') return null
+  const numeric = typeof remaining === 'number' ? remaining : Number(remaining)
+  return {
+    remaining: Number.isFinite(numeric) ? numeric.toFixed(2) : String(remaining),
+    unit: typeof value.unit === 'string' ? value.unit : ''
+  }
+}
+
+function elapsedLabel(timestamp: number, now: number): string {
+  const minutes = Math.floor((now - timestamp) / 60_000)
+  return minutes <= 0 ? '刚刚' : `${minutes} 分钟前`
+}
 
 export default function ProvidersPage(): React.JSX.Element {
-  const { agent, providers, switchState, saveProviders, saveSwitch, reload } = useApp()
+  const { agent, providers, switchState, usageQueries, saveProviders, saveSwitch, reload } =
+    useApp()
   const [dialogOpen, setDialogOpen] = useState(false)
   /** null = 新增，否则为正在编辑的 provider 名 */
   const [editingName, setEditingName] = useState<string | null>(null)
@@ -19,6 +64,15 @@ export default function ProvidersPage(): React.JSX.Element {
   const [deletingName, setDeletingName] = useState<string | null>(null)
   /** 原始配置文件编辑弹框开关 */
   const [rawOpen, setRawOpen] = useState(false)
+  /** 正在查询用量的 provider 名 */
+  const [usageDisplays, setUsageDisplays] = useState<Record<string, UsageDisplay>>({})
+  const [now, setNow] = useState(() => Date.now())
+  const [usageName, setUsageName] = useState<string | null>(null)
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const providerNames = Object.keys(providers)
 
@@ -61,13 +115,16 @@ export default function ProvidersPage(): React.JSX.Element {
     const next = { ...providers }
     delete next[name]
     const ok = await saveProviders(next, `已删除供应商「${name}」`)
-    if (ok) removeWebsite(agent, name)
+    if (ok) {
+      removeWebsite(agent, name)
+      removeUsageEndpoint(agent, name)
+      removeUsageQuery(agent, name)
+    }
   }
 
   /**
-   * 复制供应商：深拷贝原 provider，名字加 -copy 后缀，撞名则递增 -2/-3...
-   * 官网一起复制过来（不然复制完就丢了）。saveProviders 失败时跳过 website，
-   * 避免给一个不存在的供应商挂上孤立记录——对齐 confirmDelete 的处理。
+   * 官网与自定义用量接口一起复制。saveProviders 失败时不写应用配置，
+   * 避免给不存在的供应商留下孤立记录。
    */
   const copyProvider = async (name: string): Promise<void> => {
     const source = providers[name]
@@ -82,8 +139,14 @@ export default function ProvidersPage(): React.JSX.Element {
     const cloned = JSON.parse(JSON.stringify(source)) as Provider
     const next = { ...providers, [newName]: cloned }
     const website = getWebsite(agent, name)
+    const usageEndpoint = getUsageEndpoint(agent, name)
     const ok = await saveProviders(next, `已复制供应商「${name}」 → 「${newName}」`)
-    if (ok && website) setWebsite(agent, newName, website)
+    if (ok) {
+      if (website) setWebsite(agent, newName, website)
+      if (usageEndpoint) setUsageEndpoint(agent, newName, usageEndpoint)
+      const usageQuery = getUsageQuery(agent, name, source)
+      if (usageQuery.enabled || usageQuery.script) setUsageQuery(agent, newName, usageQuery)
+    }
   }
 
   const handleSave = async (name: string, provider: Provider): Promise<boolean> => {
@@ -92,6 +155,43 @@ export default function ProvidersPage(): React.JSX.Element {
     next[name] = provider
     return saveProviders(next)
   }
+
+  const refreshUsage = useCallback(
+    async (name: string): Promise<void> => {
+      const provider = providers[name]
+      if (!provider) return
+      const query = getUsageQuery(agent, name, provider)
+      if (!query.enabled) return
+      setUsageDisplays((current) => ({
+        ...current,
+        [name]: { ...current[name], loading: true, error: undefined }
+      }))
+      try {
+        const result = await fetchUsageQuery(query, provider)
+        setUsageDisplays((current) => ({
+          ...current,
+          [name]: { loading: false, updatedAt: Date.now(), extracted: result.extracted }
+        }))
+      } catch (error) {
+        setUsageDisplays((current) => ({
+          ...current,
+          [name]: { ...current[name], loading: false, error: errorMessage(error) }
+        }))
+      }
+    },
+    [agent, providers]
+  )
+
+  useEffect(() => {
+    const timers = Object.entries(providers).flatMap(([name, provider]) => {
+      const query = getUsageQuery(agent, name, provider)
+      if (!query.enabled) return []
+      void refreshUsage(name)
+      if (query.intervalMinutes === 0) return []
+      return [window.setInterval(() => void refreshUsage(name), query.intervalMinutes * 60_000)]
+    })
+    return () => timers.forEach((timer) => window.clearInterval(timer))
+  }, [agent, providers, usageQueries, refreshUsage])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-5">
@@ -132,6 +232,9 @@ export default function ProvidersPage(): React.JSX.Element {
             const roles = usedBy(name)
             const models = provider.models ?? []
             const website = getWebsite(agent, name)
+            const usageQuery = getUsageQuery(agent, name, provider)
+            const usageDisplay = usageDisplays[name]
+            const balance = balanceOf(usageDisplay?.extracted)
             /** 所有角色都在用该供应商才算完全启用 */
             const isActive = roleCount > 0 && roles.length === roleCount
             return (
@@ -189,6 +292,50 @@ export default function ProvidersPage(): React.JSX.Element {
                     {models.length === 0 ? '暂无模型' : models.map((m) => m.id).join(' · ')}
                   </div>
                 </div>
+                {usageQuery.enabled && (
+                  <div className="flex min-w-44 flex-col items-center gap-0.5 text-xs leading-4">
+                    <div className="text-muted-foreground flex items-center gap-1 text-[11px] leading-3">
+                      <span>
+                        {usageDisplay?.updatedAt
+                          ? elapsedLabel(usageDisplay.updatedAt, now)
+                          : '查询中…'}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-6"
+                        title="刷新用量"
+                        aria-label="刷新用量"
+                        disabled={usageDisplay?.loading}
+                        onClick={() => void refreshUsage(name)}
+                      >
+                        <RefreshCw
+                          className={usageDisplay?.loading ? 'size-3.5 animate-spin' : 'size-3.5'}
+                        />
+                      </Button>
+                    </div>
+                    {balance ? (
+                      <span className="whitespace-nowrap">
+                        剩余：
+                        <strong className="text-emerald-500 font-mono text-sm font-semibold tabular-nums">
+                          {balance.remaining}
+                        </strong>
+                        {balance.unit && (
+                          <span className="ml-1 font-mono text-[11px] tabular-nums">
+                            {balance.unit}
+                          </span>
+                        )}
+                      </span>
+                    ) : usageDisplay?.error ? (
+                      <span className="text-destructive" title={usageDisplay.error}>
+                        查询失败
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">暂未返回余额</span>
+                    )}
+                  </div>
+                )}
 
                 {/* 操作区：hover 浮现，避免视觉噪音 */}
                 <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
@@ -225,6 +372,15 @@ export default function ProvidersPage(): React.JSX.Element {
                   <Button
                     variant="ghost"
                     size="icon"
+                    className="text-muted-foreground hover:text-foreground size-9"
+                    title="用量查询"
+                    onClick={() => setUsageName(name)}
+                  >
+                    <BarChart3 />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     className="text-muted-foreground hover:text-destructive size-9"
                     title="删除"
                     onClick={() => setDeletingName(name)}
@@ -247,6 +403,15 @@ export default function ProvidersPage(): React.JSX.Element {
           existingNames={providerNames}
           onSave={handleSave}
           onClose={() => setDialogOpen(false)}
+        />
+      )}
+
+      {usageName && providers[usageName] && (
+        <UsageDialog
+          agent={agent}
+          name={usageName}
+          provider={providers[usageName]}
+          onClose={() => setUsageName(null)}
         />
       )}
 

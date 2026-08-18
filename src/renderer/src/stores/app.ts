@@ -9,7 +9,8 @@ import type {
   SkillRepo,
   SkillSyncMode,
   SwitchState,
-  UpdaterEvent
+  UpdaterEvent,
+  UsageQueryConfig
 } from '@shared/types'
 import { AGENT_IDS } from '@shared/types'
 import { applyTheme, getStoredTheme, storeTheme, type Theme } from '../lib/theme'
@@ -38,6 +39,10 @@ interface AppState {
   closeBehavior: CloseBehavior
   /** 供应商官网映射（key: "agent/供应商名"），存本应用配置文件 */
   websites: Record<string, string>
+  /** 供应商用量接口映射（key: "agent/供应商名"），存本应用配置文件 */
+  usageEndpoints: Record<string, string>
+  /** 供应商用量查询设置（key: "agent/供应商名"），存本应用配置文件 */
+  usageQueries: Record<string, UsageQueryConfig>
   /** ~/.omp-switch/config.json 的实际路径（设置页展示） */
   appConfigPath: string
   /** 应用配置损坏时的恢复状态；非空时禁止常规保存。 */
@@ -78,6 +83,8 @@ interface AppState {
   /** 退出并安装已下载完成的更新 */
   installUpdate: () => void
   updateWebsites: (websites: Record<string, string>) => void
+  updateUsageEndpoints: (usageEndpoints: Record<string, string>) => void
+  updateUsageQueries: (usageQueries: Record<string, UsageQueryConfig>) => void
   /** 弹目录选择框，把配置迁移到用户选的目录 */
   changeAppConfigDir: () => Promise<void>
   /** 从校验通过的 .bak 恢复损坏配置。 */
@@ -120,8 +127,16 @@ let fileConfig: AppConfig = {}
 
 /** 把当前偏好合并进配置文件整体写回（失败仅提示，不回滚 UI），返回落盘 promise */
 function persistAppConfig(): Promise<void> {
-  const { theme, closeBehavior, websites, agentOrder, hiddenAgents, appConfigIssue } =
-    useApp.getState()
+  const {
+    theme,
+    closeBehavior,
+    websites,
+    usageEndpoints,
+    usageQueries,
+    agentOrder,
+    hiddenAgents,
+    appConfigIssue
+  } = useApp.getState()
   if (appConfigIssue) {
     toast.error('应用配置已损坏，恢复或重置前不会覆盖原文件')
     return Promise.resolve()
@@ -131,6 +146,8 @@ function persistAppConfig(): Promise<void> {
     theme,
     closeBehavior,
     websites,
+    usageEndpoints,
+    usageQueries,
     agents: { order: agentOrder, hidden: hiddenAgents }
   }
   return window.api.writeAppConfig(fileConfig).catch((error) => {
@@ -171,6 +188,8 @@ export const useApp = create<AppState>((set, get) => ({
   theme: getStoredTheme(),
   closeBehavior: getCloseBehavior(),
   websites: {},
+  usageEndpoints: {},
+  usageQueries: {},
   appConfigPath: '',
   appConfigIssue: null,
   agentOrder: [...AGENT_IDS],
@@ -224,6 +243,16 @@ export const useApp = create<AppState>((set, get) => ({
 
   updateWebsites: (websites) => {
     set({ websites })
+    persistAppConfig()
+  },
+
+  updateUsageEndpoints: (usageEndpoints) => {
+    set({ usageEndpoints })
+    persistAppConfig()
+  },
+
+  updateUsageQueries: (usageQueries) => {
+    set({ usageQueries })
     persistAppConfig()
   },
 
@@ -400,6 +429,8 @@ export const useApp = create<AppState>((set, get) => ({
       const theme = config.theme ?? getStoredTheme()
       const closeBehavior = config.closeBehavior ?? getCloseBehavior()
       const websites = config.websites ?? readLegacyWebsites()
+      const usageEndpoints = config.usageEndpoints ?? {}
+      const usageQueries = config.usageQueries ?? {}
       const agentOrder = normalizeAgentOrder(config.agents?.order)
       let hiddenAgents = (config.agents?.hidden ?? []).filter((id) => agentOrder.includes(id))
       // 配置异常导致全部隐藏时兜底：全部显示
@@ -417,6 +448,8 @@ export const useApp = create<AppState>((set, get) => ({
         theme,
         closeBehavior,
         websites,
+        usageEndpoints,
+        usageQueries,
         agentOrder,
         hiddenAgents,
         skillsDir,
@@ -438,6 +471,8 @@ export const useApp = create<AppState>((set, get) => ({
         (config.theme !== theme ||
           config.closeBehavior !== closeBehavior ||
           config.websites === undefined ||
+          config.usageEndpoints === undefined ||
+          config.usageQueries === undefined ||
           config.agents === undefined)
       ) {
         persistAppConfig()
