@@ -22,7 +22,8 @@ import type {
   SkillsShSkill,
   SkillSyncMode,
   SwitchState,
-  UpdaterEvent
+  UpdaterEvent,
+  ProviderUsageResult
 } from './types'
 
 /** 拉取远程模型列表的入参（来自供应商编辑表单，不落盘） */
@@ -30,6 +31,13 @@ export interface FetchRemoteModelsPayload {
   baseUrl: string
   apiKey?: string
   api?: string
+}
+
+/** 用量查询脚本和渲染进程提供的运行时变量。 */
+export interface FetchProviderUsagePayload {
+  script: string
+  variables: Record<string, string>
+  timeoutSeconds?: number
 }
 
 /** preload 暴露给渲染进程的 API 契约（纯类型，避免渲染层引入 electron 类型依赖） */
@@ -41,6 +49,8 @@ export interface PreloadApi {
   writeSwitch(agentId: AgentId, state: SwitchState): Promise<void>
   /** 请求供应商 /models 接口，返回模型 id 列表 */
   fetchRemoteModels(payload: FetchRemoteModelsPayload): Promise<string[]>
+  /** 请求供应商用量接口，返回未改写的 JSON 响应。 */
+  fetchProviderUsage(payload: FetchProviderUsagePayload): Promise<ProviderUsageResult>
   /** 检测 pi / omp 命令行的当前版本与 npm 最新版本（本地环境检查） */
   cliVersions(): Promise<CliVersionInfo[]>
   /** 在资源管理器中显示指定配置文件；文件不存在时打开其所在目录 */

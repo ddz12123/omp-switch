@@ -4,6 +4,8 @@ import { toast } from 'sonner'
 import type { AgentId, ModelDef, Provider } from '@shared/types'
 import { errorMessage } from '../stores/app'
 import { getWebsite, renameWebsite, setWebsite } from '../lib/websites'
+import { renameUsageEndpoint } from '../lib/usageEndpoints'
+import { renameUsageQuery } from '../lib/usageQueries'
 import { cn } from '../lib/utils'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -570,10 +572,12 @@ export default function ProviderDialog({
     try {
       const ok = await onSave(trimmedName, result.provider)
       if (!ok) return setFormError('保存失败，请检查上方错误或应用日志后重试')
-      if (originalName && originalName !== trimmedName)
+      if (originalName && originalName !== trimmedName) {
         renameWebsite(agent, originalName, trimmedName)
+        renameUsageEndpoint(agent, originalName, trimmedName)
+        renameUsageQuery(agent, originalName, trimmedName)
+      }
       setWebsite(agent, trimmedName, website)
-      onClose()
     } catch (error) {
       setFormError(`保存失败：${errorMessage(error)}`)
     } finally {
@@ -663,7 +667,7 @@ export default function ProviderDialog({
             <Input
               id="p-website"
               value={website}
-              onChange={(e) => setWebsiteState(e.target.value)}
+              onChange={(event) => setWebsiteState(event.target.value)}
               placeholder="https://example.com"
               className="font-mono"
             />

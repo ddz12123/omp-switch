@@ -40,6 +40,27 @@ export interface Provider {
 
 export type ProviderMap = Record<string, Provider>
 
+/** 供应商用量接口的原始响应；不同供应商的字段不统一，保持原样展示。 */
+export interface ProviderUsageResult {
+  url: string
+  data: unknown
+  /** 用户脚本提取后的展示数据。 */
+  extracted?: unknown
+}
+
+/** 每个供应商的本地用量查询设置；不写入 CLI 配置。 */
+export interface UsageQueryConfig {
+  enabled: boolean
+  preset: 'custom' | 'general' | 'newapi'
+  apiKey?: string
+  baseUrl?: string
+  accessToken?: string
+  userId?: string
+  timeoutSeconds: number
+  intervalMinutes: number
+  script: string
+}
+
 /**
  * 归一化的模型切换状态。
  * - omp: config.yml 的 modelRoles，多角色
@@ -390,6 +411,10 @@ export interface AppConfig {
   closeBehavior?: CloseBehavior
   /** 供应商官网映射，key 为 "agent/供应商名" */
   websites?: Record<string, string>
+  /** 旧版供应商用量接口映射；保留以兼容已保存的配置。 */
+  usageEndpoints?: Record<string, string>
+  /** 供应商用量查询设置，key 为 "agent/供应商名"；仅本应用使用 */
+  usageQueries?: Record<string, UsageQueryConfig>
   /** 主界面 Agent 显示与顺序 */
   agents?: AgentDisplayConfig
   /** Skills 存储与同步设置 */

@@ -14,9 +14,10 @@ import type {
   SkillSyncMode,
   SwitchState
 } from '../shared/types'
-import type { FetchRemoteModelsPayload } from '../shared/api'
+import type { FetchRemoteModelsPayload, FetchProviderUsagePayload } from '../shared/api'
 import { getAdapter, getAgentStatuses } from './agents'
 import { fetchRemoteModels } from './remoteModels'
+import { fetchProviderUsage } from './providerUsage'
 import { getCliVersions } from './cliVersion'
 import {
   changeConfigDir,
@@ -200,6 +201,10 @@ export function registerIpc(refreshTray: () => void): void {
 
   handle('models:fetch-remote', (_e, payload: FetchRemoteModelsPayload) =>
     fetchRemoteModels(payload)
+  )
+
+  handle('providers:fetch-usage', (_e, payload: FetchProviderUsagePayload) =>
+    fetchProviderUsage(payload)
   )
 
   handle('cli:versions', () => getCliVersions())
