@@ -6,6 +6,9 @@ import icon from '../../resources/icon.png?asset'
 import { registerIpc } from './ipc'
 import { setupTray } from './tray'
 import { setupUpdater } from './updater'
+import { getMainWindow, setMainWindow } from './window'
+import { inspectAppConfig } from './appConfig'
+import { setOmpProfile } from './agents'
 import {
   configureTrustedRendererUrl,
   assertTrustedIpcSender,
@@ -13,7 +16,6 @@ import {
   isTrustedRendererUrl
 } from './lib/security'
 
-let mainWindow: BrowserWindow | null = null
 /** app.quit() 流程中（托盘退出/渲染层确认退出），放行窗口 close */
 let isQuitting = false
 
@@ -24,7 +26,7 @@ if (!gotLock) {
 }
 
 function createWindow(): void {
-  mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1080,
     height: 720,
     minWidth: 860,
@@ -40,21 +42,22 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow?.show()
+  window.on('ready-to-show', () => {
+    window.show()
   })
 
   // 点关闭按钮不直接关：交给渲染层弹确认框（最小化到托盘 / 直接退出）
-  mainWindow.on('close', (event) => {
+  window.on('close', (event) => {
     if (isQuitting) return
     event.preventDefault()
-    mainWindow?.webContents.send('close-requested')
+    getMainWindow()?.webContents.send('close-requested')
   })
 
   // 窗口销毁后释放引用，应用驻留托盘（见 window-all-closed）
-  mainWindow.on('closed', () => {
-    mainWindow = null
+  window.on('closed', () => {
+    setMainWindow(null)
   })
+  setMainWindow(window)
 
   const rendererFile = join(__dirname, '../renderer/index.html')
   const rendererUrl =
@@ -63,46 +66,71 @@ function createWindow(): void {
       : pathToFileURL(rendererFile).toString()
   configureTrustedRendererUrl(rendererUrl)
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  window.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) void shell.openExternal(url).catch(() => {})
     return { action: 'deny' }
   })
 
-  mainWindow.webContents.on('will-navigate', (event, url) => {
+  window.webContents.on('will-navigate', (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault()
   })
 
   // Only allow sanitized clipboard writes from our trusted renderer. Clipboard reads and all
   // other sensitive web permissions remain denied.
-  mainWindow.webContents.session.setPermissionCheckHandler((contents, permission) => {
+  window.webContents.session.setPermissionCheckHandler((contents, permission) => {
     return (
       permission === 'clipboard-sanitized-write' &&
       contents !== null &&
       isTrustedRendererUrl(contents.getURL())
     )
   })
-  mainWindow.webContents.session.setPermissionRequestHandler((contents, permission, callback) => {
+  window.webContents.session.setPermissionRequestHandler((contents, permission, callback) => {
     callback(permission === 'clipboard-sanitized-write' && isTrustedRendererUrl(contents.getURL()))
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    void mainWindow.loadURL(rendererUrl)
+    void window.loadURL(rendererUrl)
   } else {
-    void mainWindow.loadFile(rendererFile)
+    void window.loadFile(rendererFile)
   }
 }
 
 function showWindow(): void {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.show()
-    mainWindow.focus()
+  const existing = getMainWindow()
+  if (existing) {
+    if (existing.isMinimized()) existing.restore()
+    existing.show()
+    existing.focus()
   } else {
     createWindow()
   }
 }
 
-app.whenReady().then(() => {
+/**
+ * 启动时恢复上次选择的 omp profile。
+ * 必须在 registerIpc / setupTray 之前：托盘和所有 IPC 读的都是适配器当前的 agentDir。
+ */
+async function restoreOmpProfile(): Promise<void> {
+  try {
+    const result = await inspectAppConfig()
+    if (result.status !== 'ok') return
+    const profile = typeof result.config.ompProfile === 'string' ? result.config.ompProfile : ''
+    if (profile === '') {
+      setOmpProfile('')
+      return
+    }
+    setOmpProfile(profile)
+  } catch (error) {
+    // profile 恢复失败不能阻断启动，退回默认 profile
+    console.error('恢复 omp profile 失败，使用默认 profile', error)
+    setOmpProfile('')
+  }
+}
+
+app.whenReady().then(async () => {
+  // 先恢复 profile，再建托盘/IPC，保证两者一开始就用对的 agent 目录
+  await restoreOmpProfile()
+
   electronApp.setAppUserModelId('com.ompswitch.app')
 
   app.on('browser-window-created', (_, window) => {
@@ -120,7 +148,7 @@ app.whenReady().then(() => {
       app.quit()
     } else {
       // destroy 不触发 close 事件，避免再次弹确认
-      mainWindow?.destroy()
+      getMainWindow()?.destroy()
     }
   })
 
@@ -134,14 +162,14 @@ app.whenReady().then(() => {
     showWindow,
     onStateChanged: (agentId) => {
       // 托盘切换后通知打开着的窗口刷新数据
-      mainWindow?.webContents.send('state-changed', agentId)
+      getMainWindow()?.webContents.send('state-changed', agentId)
     }
   })
 
   registerIpc(refreshTray)
 
   // 自更新接线：窗口用 getter 惰性获取（事件在 checkForUpdates 后才触发）
-  setupUpdater(() => mainWindow)
+  setupUpdater(getMainWindow)
 
   createWindow()
 

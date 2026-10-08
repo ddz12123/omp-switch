@@ -2,9 +2,9 @@ import { existsSync } from 'fs'
 import { lstat, open, readdir, readFile, realpath, rm, rmdir, stat } from 'fs/promises'
 import { homedir } from 'os'
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'path'
-import { parseDocument } from 'yaml'
 import type { SessionMeta, SessionRaw, SessionRootInfo, SessionRootKind } from '../shared/types'
 import { readAppConfig } from './appConfig'
+import { getOmpAgentDir, getOmpProfile } from './agents'
 
 /**
  * 会话（sessions）读取与管理。
@@ -41,9 +41,9 @@ function expandTilde(p: string): string {
 }
 
 /**
- * 读取某个 agent home 下 CLI 配置文件里的 sessionDir 设置
- * （pi: settings.json / omp: config.yml，二者共用该键）。
- * 相对路径按官方文档相对 agent home 解析；文件缺失或损坏时静默忽略。
+ * 读取 pi 的 settings.json 里的 sessionDir 设置。
+ * omp 没有这个配置项（会话目录固定为 <agent dir>/sessions，实测 `omp config list` 无此键），
+ * 因此只探测 pi；相对路径按官方文档相对 agent home 解析，文件缺失或损坏时静默忽略。
  */
 async function readConfigSessionDirs(home: string): Promise<string[]> {
   const dirs: string[] = []
@@ -61,25 +61,13 @@ async function readConfigSessionDirs(home: string): Promise<string[]> {
   } catch {
     // settings.json 不存在或解析失败，跳过
   }
-  try {
-    const raw = await readFile(join(home, 'config.yml'), 'utf8')
-    const doc = parseDocument(raw)
-    if (doc.errors.length === 0) {
-      const parsed: unknown = doc.toJS()
-      if (typeof parsed === 'object' && parsed !== null) {
-        push((parsed as Record<string, unknown>).sessionDir)
-      }
-    }
-  } catch {
-    // config.yml 不存在或解析失败，跳过
-  }
   return dirs
 }
 
 /**
  * 枚举全部候选会话根目录，去重（按规范化绝对路径）：
- * 默认 home ×2 → PI_CODING_AGENT_DIR/sessions → PI_CODING_AGENT_SESSION_DIR
- * → CLI 配置文件里的 sessionDir → 用户自定义。
+ * 默认 home ×2（含 omp 命名 profile）→ PI_CODING_AGENT_DIR/sessions →
+ * PI_CODING_AGENT_SESSION_DIR → pi settings.json 的 sessionDir → 用户自定义。
  */
 export async function resolveSessionRoots(): Promise<SessionRootInfo[]> {
   const roots: SessionRootInfo[] = []
@@ -94,6 +82,12 @@ export async function resolveSessionRoots(): Promise<SessionRootInfo[]> {
   add(OMP_DEFAULT_SESSIONS, 'OMP · 默认目录', 'omp-default')
   add(PI_DEFAULT_SESSIONS, 'Pi · 默认目录', 'pi-default')
 
+  // omp 命名 profile 有独立的 agent 目录，会话也存在各自目录下
+  const ompProfile = getOmpProfile()
+  if (ompProfile !== '') {
+    add(join(getOmpAgentDir(), 'sessions'), `OMP · profile ${ompProfile}`, 'omp-default')
+  }
+
   const envHome = process.env[ENV_AGENT_DIR]?.trim()
   if (envHome)
     add(join(expandTilde(envHome), 'sessions'), `自定义 · ${ENV_AGENT_DIR}`, 'env-agent-dir')
@@ -101,9 +95,8 @@ export async function resolveSessionRoots(): Promise<SessionRootInfo[]> {
   const envSession = process.env[ENV_SESSION_DIR]?.trim()
   if (envSession) add(envSession, `自定义 · ${ENV_SESSION_DIR}`, 'env-session-dir')
 
-  // CLI 配置文件里的 sessionDir（env home 生效时两个 CLI 都会改用该 home 下的配置）
+  // pi settings.json 里的 sessionDir（env home 生效时 pi 会用该 home 下的配置）
   const homes: { home: string; label: string }[] = [
-    { home: join(homedir(), '.omp', 'agent'), label: 'omp' },
     { home: join(homedir(), '.pi', 'agent'), label: 'pi' }
   ]
   if (envHome) homes.push({ home: expandTilde(envHome), label: ENV_AGENT_DIR })

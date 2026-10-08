@@ -7,6 +7,7 @@ import type {
   ConfigFileKind,
   McpListResult,
   McpSaveRequest,
+  OmpProfileInfo,
   PiPluginOperationEvent,
   PiPluginSearchResult,
   PiPluginsListResult,
@@ -43,6 +44,10 @@ export interface PreloadApi {
   fetchRemoteModels(payload: FetchRemoteModelsPayload): Promise<string[]>
   /** 检测 pi / omp 命令行的当前版本与 npm 最新版本（本地环境检查） */
   cliVersions(): Promise<CliVersionInfo[]>
+  /** 本机存在的 omp 命名 profile 列表（~/.omp/profiles/<name>/agent） */
+  listOmpProfiles(): Promise<OmpProfileInfo[]>
+  /** 切换 omp 激活的 profile（空串 = 默认 profile），会持久化到应用配置 */
+  setOmpProfile(profile: string): Promise<void>
   /** 在资源管理器中显示指定配置文件；文件不存在时打开其所在目录 */
   showConfigInFolder(agentId: AgentId, kind: ConfigFileKind): Promise<void>
   /** 读取原始配置文件文本（供 Monaco 编辑器直接编辑），文件不存在时 content 为空串 */

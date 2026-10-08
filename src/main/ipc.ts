@@ -15,7 +15,7 @@ import type {
   SwitchState
 } from '../shared/types'
 import type { FetchRemoteModelsPayload } from '../shared/api'
-import { getAdapter, getAgentStatuses } from './agents'
+import { getAdapter, getAgentStatuses, getOmpProfile, listOmpProfiles, setOmpProfile } from './agents'
 import { fetchRemoteModels } from './remoteModels'
 import { getCliVersions } from './cliVersion'
 import {
@@ -55,6 +55,7 @@ import {
   resolveSessionWorkingDirectory
 } from './sessions'
 import { readTextFile, writeTextFileSafe } from './lib/fileio'
+import { getMainWindow } from './window'
 import { checkForUpdates, downloadUpdate, quitAndInstall } from './updater'
 import { assertTrustedIpcSender, isAllowedExternalUrl } from './lib/security'
 import {
@@ -203,6 +204,32 @@ export function registerIpc(refreshTray: () => void): void {
   )
 
   handle('cli:versions', () => getCliVersions())
+
+  /** 本机存在的 omp 命名 profile 列表 */
+  handle('omp-profiles:list', () => listOmpProfiles())
+
+  /**
+   * 切换 omp profile：先落应用配置再切适配器；落盘失败则回滚内存态，
+   * 保证「设置页显示的那个 profile」始终就是实际在读写的目录。
+   */
+  handle('omp-profiles:set', async (_e, profile: unknown) => {
+    if (typeof profile !== 'string') throw new Error('profile 必须是字符串')
+    const name = profile.trim()
+    const previous = getOmpProfile()
+    if (name !== previous) setOmpProfile(name)
+    try {
+      const current = await inspectAppConfig()
+      if (current.status === 'invalid') {
+        throw new Error('应用配置已损坏，请先到设置页恢复或重置后再切换 profile')
+      }
+      await writeAppConfig({ ...current.config, ompProfile: name })
+    } catch (error) {
+      setOmpProfile(previous)
+      throw error
+    }
+    refreshTray()
+    getMainWindow()?.webContents.send('state-changed', 'omp')
+  })
 
   handle('config:show-in-folder', async (_e, agentId: AgentId, kind: ConfigFileKind) => {
     const path = rawConfigPath(agentId, kind)

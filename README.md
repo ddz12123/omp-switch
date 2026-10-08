@@ -9,21 +9,25 @@
 ## ✨ 功能特性
 
 - **双 Agent 管理** — 在同一界面切换管理 pi 和 omp，各自的配置文件路径自动探测。
-- **供应商（Providers）** — 增删改各供应商及模型；支持 omp 全部 7 种 API 类型
+- **供应商（Providers）** — 增删改各供应商及模型；支持 omp 全部 11 种 API 类型
   （`openai-responses` / `openai-completions` / `openai-codex-responses` /
-  `azure-openai-responses` / `anthropic-messages` / `google-generative-ai` / `google-vertex`），
+  `azure-openai-responses` / `anthropic-messages` / `google-generative-ai` / `google-vertex` /
+  `google-gemini-cli` / `bedrock-converse-stream` / `openrouter-decisions` / `typesafe`），
   可选拉取供应商的远程模型列表。
 - **模型切换（Switch）**
   - pi：设置 `defaultProvider` / `defaultModel` / `defaultThinkingLevel`（单角色）。
-  - omp：管理 `modelRoles` 多角色（default / plan / vision / commit …）。
-  - 思考等级支持 `off / minimal / low / medium / high / xhigh / max`。
+  - omp：管理 `modelRoles` 多角色（default / smol / slow / plan / vision / commit / task / advisor /
+    tiny / memory，以及 image / web / speech / dictation / judge 等按模型种类选型的角色）。
+  - 思考等级支持 `off / minimal / low / medium / high / xhigh / max`（omp 额外支持 `auto`）。
+- **OMP Profile** — 本机存在命名 profile（`~/.omp/profiles/<name>/agent`）时可在设置页切换，
+  供应商、模型角色、Skills、MCP、会话会一起指向该 profile 的目录。
 - **Skills** — 从 GitHub 仓库或 [skills.sh](https://skills.sh) 浏览、安装、卸载技能；
   中央仓库统一存放，按需以**软链接**（省空间、实时生效）或**文件复制**分发到各 Agent。
 - **Pi 插件（Packages）** — 管理 Pi 全局 npm / Git / 本地 Package；支持启停、更新、卸载，并检查自动发现的本地扩展。
 - **MCP** — 可视化管理 `mcp.json` 中的 MCP Server。
 - **会话（Sessions）** — 浏览、搜索、删除会话；自动汇总多个会话根目录
-  （CLI 默认目录、`PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR` 环境变量、
-  配置文件里的 `sessionDir`、以及手动添加的目录），内置 Monaco 只读查看原始 JSONL。
+  （CLI 默认目录、omp 命名 profile 目录、`PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR`
+  环境变量、pi `settings.json` 里的 `sessionDir`、以及手动添加的目录），内置 Monaco 只读查看原始 JSONL。
 - **原始配置编辑** — 内嵌 Monaco 编辑器直接编辑配置文件，保存前做语法校验并自动生成 `.bak` 备份。
 - **系统托盘** — 托盘菜单快速查看/切换当前模型。
 - **主题与体验** — 浅色 / 深色 / 跟随系统；可配置关闭窗口行为（询问 / 最小化到托盘 / 直接退出）。
@@ -89,6 +93,7 @@ pnpm run build:linux
 src/
 ├── main/            # 主进程：配置读写、IPC、托盘
 │   ├── agents/      # pi / omp 适配器（路径探测、读写、格式保真）
+│   ├── lib/         # 点路径遍历、原子写等公共工具
 │   ├── appConfig.ts # 应用自身配置
 │   ├── sessions.ts  # 会话根目录探测与会话读写
 │   ├── piPlugins.ts   # Pi Packages 与本地扩展管理
@@ -99,6 +104,19 @@ src/
 │   └── src/pages/   # Providers / Switch / Skills / MCP / Sessions / Settings
 └── shared/          # 主/渲染共享的类型与工具
 ```
+
+## 🔖 配置项对齐
+
+「全局配置」页的表单由 `src/main/agents/configSchema.ts` 写死驱动（pi 47 项 / omp 87 项），
+刻意**不做运行时动态拉取**：CLI 一升级就变界面行为，风险和回归面都不可控。
+升级 pi / omp 后按下面的步骤手工对齐：
+
+1. omp：`omp config list --json` 拿权威清单（含 type / 默认值 / 描述，18.8.3 共 537 键）；
+   pi：查 <https://pi.dev/docs/latest/settings> 的 Settings Reference（1.1.x 共 55 个顶层键）。
+2. 对照 `PI_CONFIG_SCHEMA` / `OMP_CONFIG_SCHEMA`：权威清单里已消失的键从表里删掉
+   （继续写只会落一个不生效的死配置，例如 omp 的 `compaction.strategy` 已迁移为
+   `compaction.methodOrder`）；新增的高频键按 `ConfigFieldDef` 补进对应分组。
+3. `pnpm run check` 通过后发布。
 
 ## 🔒 数据与隐私
 

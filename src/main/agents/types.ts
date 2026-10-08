@@ -6,6 +6,9 @@ import type {
   SwitchState
 } from '../../shared/types'
 
+/** 点路径遍历与 isPlainObject 的唯一定义在 lib/paths，这里转供适配器使用 */
+export { isPlainObject } from '../lib/paths'
+
 /**
  * Agent 适配器：屏蔽 pi / omp 两套配置文件格式差异，
  * 上层（IPC / 托盘）只面向统一的 ProviderMap + SwitchState。
@@ -38,6 +41,3 @@ export interface AgentAdapter {
   writeSwitchState(state: SwitchState): Promise<void>
 }
 
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}

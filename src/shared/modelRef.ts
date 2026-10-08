@@ -1,10 +1,15 @@
-import { EFFORT_LEVELS, type RoleAssignment } from './types'
+import { EFFORT_LEVELS, OMP_EFFORT_LEVELS, type AgentId, type RoleAssignment } from './types'
 
 /**
  * 解析 `Provider/model:effort` 三段式引用（effort 可选）。
  * 无法解析时返回 provider 为空串、model 存原文的兜底值，保证写回不丢原始内容。
+ *
+ * effortLevels 决定哪些后缀被当作思考等级：pi 只有 7 档，omp 额外支持 `auto`。
  */
-export function parseModelRef(ref: string): RoleAssignment {
+export function parseModelRef(
+  ref: string,
+  effortLevels: readonly string[] = EFFORT_LEVELS
+): RoleAssignment {
   const raw = ref.trim()
   const slash = raw.indexOf('/')
   if (slash <= 0 || slash === raw.length - 1) {
@@ -17,12 +22,20 @@ export function parseModelRef(ref: string): RoleAssignment {
   if (colon > 0) {
     const suffix = model.slice(colon + 1)
     // 只有后缀是已知 effort 等级才当作 effort，避免误切模型 id 里的冒号
-    if ((EFFORT_LEVELS as readonly string[]).includes(suffix)) {
+    if (effortLevels.includes(suffix)) {
       effort = suffix
       model = model.slice(0, colon)
     }
   }
   return { provider, model, effort }
+}
+
+/**
+ * 某个 agent 支持的思考等级（用于解析 modelRef 与「模型切换」页下拉）。
+ * pi 只有 7 档；omp 额外支持 auto。
+ */
+export function effortLevelsFor(agent: AgentId): readonly string[] {
+  return agent === 'omp' ? OMP_EFFORT_LEVELS : EFFORT_LEVELS
 }
 
 export function formatModelRef(a: RoleAssignment): string {

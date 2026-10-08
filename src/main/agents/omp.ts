@@ -1,41 +1,113 @@
-import { existsSync } from 'fs'
+import { existsSync, readdirSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { parseDocument, Document } from 'yaml'
-import type { ProviderMap, RuleFileSpec, SwitchState } from '../../shared/types'
+import type {
+  OmpProfileInfo,
+  ProviderMap,
+  RuleFileSpec,
+  SwitchState
+} from '../../shared/types'
+import { OMP_EFFORT_LEVELS } from '../../shared/types'
 import { formatModelRef, parseModelRef } from '../../shared/modelRef'
 import { readTextFile, writeTextFileSafe } from '../lib/fileio'
 import { isPlainObject, type AgentAdapter } from './types'
-import { getByPath, OMP_CONFIG_SCHEMA } from './configSchema'
+import { OMP_CONFIG_SCHEMA } from './configSchema'
+import { getByPath } from '../lib/paths'
 
 /**
  * omp (Oh My Pi) 适配器：
  * - 供应商: ~/.omp/agent/models.yml（YAML，根键 providers）
  * - 切换:   ~/.omp/agent/config.yml（modelRoles 角色映射，值形如 Provider/model:effort）
  * 用 yaml Document API 只替换目标节点，文件其余部分（setupVersion、根级注释等）保持原样。
+ *
+ * omp 18.x 支持命名 profile：激活后 agent 目录变成
+ * ~/.omp/profiles/<name>/agent（等价于 `omp --profile <name>` / `OMP_PROFILE=<name>`）。
+ * 所有路径都从 agentDir 派生，切换 profile 只需 setProfile()，调用方无需改代码。
  */
 export class OmpAdapter implements AgentAdapter {
   readonly id = 'omp' as const
   readonly label = 'OMP'
   readonly multiRole = true
-  readonly providersPath = join(homedir(), '.omp', 'agent', 'models.yml')
-  readonly switchPath = join(homedir(), '.omp', 'agent', 'config.yml')
-  readonly skillsDir = join(homedir(), '.omp', 'agent', 'skills')
-  readonly mcpPath = join(homedir(), '.omp', 'agent', 'mcp.json')
+  /** omp 配置根目录，PI_CONFIG_DIR 可改根名（与 omp 的 getConfigDirName 一致） */
+  readonly configRoot: string
+  /** 当前激活的 profile 名，空串 = 默认 profile */
+  private profile = ''
+
+  constructor(profile = '') {
+    this.configRoot = join(homedir(), process.env.PI_CONFIG_DIR?.trim() || '.omp')
+    this.profile = profile
+  }
+
+  /** 当前 agent 目录（默认 ~/.omp/agent，命名 profile 为 ~/.omp/profiles/<name>/agent） */
+  get agentDir(): string {
+    return this.profile
+      ? join(this.configRoot, 'profiles', this.profile, 'agent')
+      : join(this.configRoot, 'agent')
+  }
+
+  /** 当前 profile 名（空串 = 默认） */
+  get profileName(): string {
+    return this.profile
+  }
+
+  get providersPath(): string {
+    return join(this.agentDir, 'models.yml')
+  }
+
+  get switchPath(): string {
+    return join(this.agentDir, 'config.yml')
+  }
+
+  get skillsDir(): string {
+    return join(this.agentDir, 'skills')
+  }
+
+  get mcpPath(): string {
+    return join(this.agentDir, 'mcp.json')
+  }
+
   /** omp 的全局规则：AGENTS.md 开场注入 + RULES.md sticky 始终生效 */
-  readonly ruleFiles: RuleFileSpec[] = [
-    {
-      name: 'AGENTS.md',
-      path: join(homedir(), '.omp', 'agent', 'AGENTS.md'),
-      kind: 'context'
-    },
-    {
-      name: 'RULES.md',
-      path: join(homedir(), '.omp', 'agent', 'RULES.md'),
-      kind: 'sticky'
-    }
-  ]
+  get ruleFiles(): RuleFileSpec[] {
+    return [
+      { name: 'AGENTS.md', path: join(this.agentDir, 'AGENTS.md'), kind: 'context' },
+      { name: 'RULES.md', path: join(this.agentDir, 'RULES.md'), kind: 'sticky' }
+    ]
+  }
+
   readonly configSchema = OMP_CONFIG_SCHEMA
+
+  /** 本机已存在的命名 profile（~/.omp/profiles/<name>/agent 目录为空或不存在） */
+  listProfiles(): OmpProfileInfo[] {
+    const profilesRoot = join(this.configRoot, 'profiles')
+    let entries: string[] = []
+    try {
+      entries = readdirSync(profilesRoot, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+    } catch {
+      return []
+    }
+    return entries
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({
+        name,
+        agentDir: join(profilesRoot, name, 'agent'),
+        label: name
+      }))
+  }
+
+  /**
+   * 切换激活的 profile。传空串回到默认 profile；传不存在的名字直接抛错，
+   * 避免把配置写进一个意外目录。
+   */
+  setProfile(name: string): void {
+    const next = name.trim()
+    if (next !== '' && !this.listProfiles().some((p) => p.name === next)) {
+      throw new Error(`OMP profile 不存在：${next}`)
+    }
+    this.profile = next
+  }
 
   detect(): boolean {
     return existsSync(this.providersPath) || existsSync(this.switchPath)
@@ -71,7 +143,8 @@ export class OmpAdapter implements AgentAdapter {
     if (isPlainObject(root) && isPlainObject(root.modelRoles)) {
       for (const [role, value] of Object.entries(root.modelRoles)) {
         if (typeof value === 'string') {
-          roles[role] = parseModelRef(value)
+          // omp 的 effort 后缀额外支持 auto
+          roles[role] = parseModelRef(value, OMP_EFFORT_LEVELS)
         }
       }
     }

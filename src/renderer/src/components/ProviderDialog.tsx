@@ -28,7 +28,7 @@ const PI_API_OPTIONS = [
   'google-generative-ai'
 ]
 
-/** OMP models.yml 当前支持的 API 类型。 */
+/** OMP models.yml 当前支持的 API 类型（omp config list 的 provider api 全集）。 */
 const OMP_API_OPTIONS = [
   'anthropic-messages',
   'openai-completions',
@@ -37,11 +37,22 @@ const OMP_API_OPTIONS = [
   'azure-openai-responses',
   'google-generative-ai',
   'google-vertex',
+  'google-gemini-cli',
   'bedrock-converse-stream',
-  'google-gemini-cli'
+  'openrouter-decisions',
+  'typesafe'
 ]
 
-const OMP_OPTIONAL_BASE_URL_APIS = new Set(['bedrock-converse-stream', 'google-gemini-cli'])
+/**
+ * 这些 api 由 omp 内置托管（Bedrock 走 AWS 链、Gemini CLI 走本机登录、
+ * typesafe / openrouter-decisions 走 omp 判定服务），没有自定义模型时可不填 baseUrl。
+ */
+const OMP_OPTIONAL_BASE_URL_APIS = new Set([
+  'bedrock-converse-stream',
+  'google-gemini-cli',
+  'typesafe',
+  'openrouter-decisions'
+])
 const DISCOVERY_TYPES = ['ollama', 'llamacpp', 'lmstudio', 'vllm', 'sglang', 'kilo']
 const TRANSPORT_TYPES = ['pi-native']
 

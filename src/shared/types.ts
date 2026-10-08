@@ -68,6 +68,8 @@ export interface AgentStatus {
   mcpPath: string
   /** 是否支持多角色（omp true / pi false） */
   multiRole: boolean
+  /** omp 当前激活的 profile 名（空串 = 默认 profile），pi 为空串 */
+  profile?: string
 }
 
 /** 本地 CLI（pi/omp）版本检测结果，用于设置页「本地环境检查」 */
@@ -376,6 +378,16 @@ export type Theme = 'light' | 'dark' | 'system'
 export type CloseBehavior = 'ask' | 'minimize' | 'quit'
 
 /** 主界面 Agent 的显示设置：顺序 + 隐藏项 */
+/** 本机已存在的一个 omp 命名 profile（~/.omp/profiles/<name>/agent） */
+export interface OmpProfileInfo {
+  /** profile 名（目录名） */
+  name: string
+  /** 该 profile 的 agent 目录绝对路径 */
+  agentDir: string
+  /** 展示名，缺省同 name */
+  label: string
+}
+
 export interface AgentDisplayConfig {
   order?: AgentId[]
   hidden?: AgentId[]
@@ -392,6 +404,8 @@ export interface AppConfig {
   websites?: Record<string, string>
   /** 主界面 Agent 显示与顺序 */
   agents?: AgentDisplayConfig
+  /** omp 激活的命名 profile（空串/缺省 = 默认 ~/.omp/agent） */
+  ompProfile?: string
   /** Skills 存储与同步设置 */
   skills?: SkillsConfig
   /** 会话管理设置（用户手动添加的会话根目录） */
@@ -479,20 +493,35 @@ export interface SessionRaw {
   truncated: boolean
 }
 
-/** pi/omp 的思考等级（pi 文档：defaultThinkingLevel；omp：modelRef 的 :effort 后缀） */
+/** pi 的思考等级（pi 文档：defaultThinkingLevel） */
 export const EFFORT_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
+/** omp 额外支持 auto：由模型能力自动裁定思考深度（见 omp CLI_THINKING_LEVELS） */
+export const OMP_EFFORT_LEVELS = [...EFFORT_LEVELS, 'auto'] as const
+
+/**
+ * omp 内置模型角色（omp 18.x）。
+ * 前 10 个是 chat 角色，后 5 个是按模型「种类」选型的角色（图片/搜索/语音/听写/评审）。
+ * 自定义角色（modelTags / cycleOrder 引入）不在列表内，由用户手工输入。
+ */
 export const OMP_KNOWN_ROLES = [
+  // chat 角色
   'default',
   'smol',
   'slow',
   'plan',
   'vision',
-  'designer',
   'commit',
   'task',
   'advisor',
-  'tiny'
+  'tiny',
+  'memory',
+  // 按模型种类选型的角色
+  'image',
+  'web',
+  'speech',
+  'dictation',
+  'judge'
 ] as const
 
 /**

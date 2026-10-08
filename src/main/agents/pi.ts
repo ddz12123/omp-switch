@@ -4,7 +4,8 @@ import { join } from 'path'
 import type { ProviderMap, RuleFileSpec, SwitchState } from '../../shared/types'
 import { readTextFile, writeTextFileSafe } from '../lib/fileio'
 import { isPlainObject, type AgentAdapter } from './types'
-import { getByPath, PI_CONFIG_SCHEMA } from './configSchema'
+import { deleteByPath, getByPath, setByPath } from '../lib/paths'
+import { PI_CONFIG_SCHEMA } from './configSchema'
 
 /**
  * pi 适配器：
@@ -92,10 +93,10 @@ export class PiAdapter implements AgentAdapter {
   async writeConfigValues(updates: Record<string, unknown>, deletes: string[]): Promise<void> {
     const settings = await this.readJson(this.switchPath)
     for (const [key, value] of Object.entries(updates)) {
-      settings[key] = value
+      setByPath(settings, key, value)
     }
     for (const key of deletes) {
-      delete settings[key]
+      deleteByPath(settings, key)
     }
     await writeTextFileSafe(this.switchPath, JSON.stringify(settings, null, 2) + '\n')
   }

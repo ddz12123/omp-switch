@@ -31,13 +31,14 @@ import { toast } from 'sonner'
 import type {
   AgentId,
   CliVersionInfo,
+  OmpProfileInfo,
   SessionRootInfo,
   SkillSyncMode,
   UpdaterEvent
 } from '@shared/types'
 import type { Theme } from '../lib/theme'
 import type { CloseBehavior } from '../lib/closeBehavior'
-import { useApp } from '../stores/app'
+import { errorMessage, useApp } from '../stores/app'
 import { cn } from '../lib/utils'
 import { AgentIcon } from '../components/AgentIcon'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -196,7 +197,8 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
     updater,
     checkUpdate,
     downloadUpdate,
-    installUpdate
+    installUpdate,
+    reload
   } = useApp()
 
   const [resetConfigOpen, setResetConfigOpen] = useState(false)
@@ -244,6 +246,41 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
 
   const updateBusy = updater.status === 'checking' || updater.status === 'downloading'
   const updateBanner = updaterBanner(updater)
+
+  // omp 命名 profile：只在真的有 profile 时展示（默认 profile 不需要选）
+  const [ompProfiles, setOmpProfiles] = useState<OmpProfileInfo[]>([])
+  /** null = 跟随主进程状态；手动切换后先本地覆盖，避免等下一次 statuses 刷新 */
+  const [ompProfileOverride, setOmpProfileOverride] = useState<string | null>(null)
+  const ompProfile =
+    ompProfileOverride ?? statuses.find((s) => s.id === 'omp')?.profile ?? ''
+  const [ompProfileBusy, setOmpProfileBusy] = useState(false)
+  const loadOmpProfiles = useCallback((): Promise<void> => {
+    return window.api
+      .listOmpProfiles()
+      .then(setOmpProfiles)
+      .catch(() => setOmpProfiles([]))
+  }, [])
+  useEffect(() => {
+    void loadOmpProfiles()
+  }, [loadOmpProfiles])
+
+
+  const handleOmpProfileChange = async (value: string): Promise<void> => {
+    setOmpProfileBusy(true)
+    try {
+      await window.api.setOmpProfile(value)
+      setOmpProfileOverride(value)
+      toast.success(value === '' ? '已切回默认 profile' : `已切换到 profile：${value}`)
+      // 配置目录变了，重新拉取当前 Agent 的供应商/角色等数据
+      await reload()
+      await loadOmpProfiles()
+      await loadSessionRoots()
+    } catch (error) {
+      toast.error(`切换 profile 失败：${errorMessage(error)}`)
+    } finally {
+      setOmpProfileBusy(false)
+    }
+  }
 
   // 拖拽排序：拖动中用本地预览顺序实时换位，松手才提交持久化
   const [dragging, setDragging] = useState<AgentId | null>(null)
@@ -423,6 +460,41 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
                 })}
               </CardContent>
             </Card>
+
+            {ompProfiles.length > 0 && (
+              <Card className="gap-3">
+                <CardHeader>
+                  <CardTitle>OMP Profile</CardTitle>
+                  <CardDescription>
+                    切换后供应商、模型角色、技能、MCP、会话全部指向该 profile 的 agent 目录
+                    （~/.omp/profiles/&lt;名称&gt;/agent）
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex items-center gap-3">
+                  <Label className="text-muted-foreground shrink-0 text-sm font-normal">
+                    当前 profile
+                  </Label>
+                  <Select
+                    value={ompProfile}
+                    disabled={ompProfileBusy}
+                    onValueChange={(v) => void handleOmpProfileChange(v)}
+                  >
+                    <SelectTrigger className="w-56" size="sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">默认（~/.omp/agent）</SelectItem>
+                      {ompProfiles.map((p) => (
+                        <SelectItem key={p.name} value={p.name}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {ompProfileBusy && <Loader2 className="size-4 animate-spin" />}
+                </CardContent>
+              </Card>
+            )}
 
             <Card className="gap-3">
               <CardHeader>

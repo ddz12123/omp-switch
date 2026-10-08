@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { FileCode, FolderOpen, Plus, Trash2 } from 'lucide-react'
-import { EFFORT_LEVELS, OMP_KNOWN_ROLES, type RoleAssignment } from '@shared/types'
-import { modelKey, parseModelRef } from '@shared/modelRef'
+import { OMP_KNOWN_ROLES, type RoleAssignment } from '@shared/types'
+import { effortLevelsFor, modelKey, parseModelRef } from '@shared/modelRef'
 import { useApp } from '../stores/app'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
@@ -73,6 +73,8 @@ export default function SwitchPage(): React.JSX.Element {
   }, [groups])
 
   const roles = Object.entries(switchState.roles)
+  /** omp 额外支持 auto 思考等级，pi 只有 7 档 */
+  const effortLevels = effortLevelsFor(agent)
 
   const updateRole = (role: string, assignment: RoleAssignment): void => {
     void saveSwitch({ ...switchState, roles: { ...switchState.roles, [role]: assignment } })
@@ -80,7 +82,7 @@ export default function SwitchPage(): React.JSX.Element {
 
   const handleModelChange = (role: string, key: string): void => {
     const current = switchState.roles[role]
-    const target = optionIndex.get(key) ?? parseModelRef(key)
+    const target = optionIndex.get(key) ?? parseModelRef(key, effortLevels)
     updateRole(role, { ...target, effort: current?.effort })
   }
 
@@ -167,7 +169,7 @@ export default function SwitchPage(): React.JSX.Element {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={EFFORT_NONE}>无</SelectItem>
-            {EFFORT_LEVELS.map((level) => (
+            {effortLevels.map((level) => (
               <SelectItem key={level} value={level}>
                 {level}
               </SelectItem>
