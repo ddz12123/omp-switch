@@ -34,6 +34,8 @@ interface AppState {
   page: PageId
   /** 从全局页「返回」时回到的基础页（进入全局页前最近所在的基础页） */
   returnPage: PageId
+  /** init() 是否已完成（首帧渲染期间为 false，用于跳过 Agent 切换滑块的过渡动画） */
+  initialized: boolean
   theme: Theme
   closeBehavior: CloseBehavior
   /** 供应商官网映射（key: "agent/供应商名"），存本应用配置文件 */
@@ -154,6 +156,12 @@ function normalizeAgentOrder(order: unknown): AgentId[] {
   return [...new Set([...known, ...AGENT_IDS])]
 }
 
+/**
+ * 本次会话用户是否手动切过 Agent。
+ * 手动切过就不再被启动时的自动选择覆盖；没动过才按设置里的显示顺序挑第一个可见的。
+ */
+let agentPickedByUser = false
+
 /** 历史版本官网映射存 localStorage，读出来做一次性迁移 */
 function readLegacyWebsites(): Record<string, string> {
   try {
@@ -168,6 +176,7 @@ export const useApp = create<AppState>((set, get) => ({
   agent: 'omp',
   page: 'providers',
   returnPage: 'providers',
+  initialized: false,
   theme: getStoredTheme(),
   closeBehavior: getCloseBehavior(),
   websites: {},
@@ -370,6 +379,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   setAgent: (agent) => {
     if (agent === get().agent) return
+    agentPickedByUser = true
     const leavingPiPlugins = agent !== 'pi' && get().page === 'plugins'
     set({
       agent,
@@ -453,17 +463,27 @@ export const useApp = create<AppState>((set, get) => ({
       const statuses = await window.api.agentsStatus()
       set({ statuses })
       // 当前选中项被隐藏，或未安装且存在已安装项时，按显示顺序重选
-      const { agentOrder, hiddenAgents, agent } = get()
+      const { agentOrder, hiddenAgents } = get()
       const visible = agentOrder.filter((id) => !hiddenAgents.includes(id))
-      const installed = visible.find((id) => statuses.find((s) => s.id === id)?.installed)
-      if (!visible.includes(agent)) {
-        set({ agent: installed ?? visible[0] })
-      } else if (installed && !statuses.find((s) => s.id === agent)?.installed) {
-        set({ agent: installed })
+      const installedVisible = visible.find((id) => statuses.find((s) => s.id === id)?.installed)
+      const fallback = installedVisible ?? visible[0]
+      if (!agentPickedByUser) {
+        // 未手动切换过：按设置里的显示顺序选第一个可见的（优先已安装），
+        // 否则只会一直停在 store 的初始默认值上，和用户在设置里排的顺序无关
+        if (fallback) set({ agent: fallback })
+      } else {
+        const { agent } = get()
+        if (!visible.includes(agent)) {
+          set({ agent: fallback })
+        } else if (installedVisible && !statuses.find((s) => s.id === agent)?.installed) {
+          set({ agent: installedVisible })
+        }
       }
     } catch (error) {
       set({ error: errorMessage(error) })
     }
+    // 初始 Agent 已按显示顺序落定，之后再切才播放滑块过渡动画
+    set({ initialized: true })
     await get().reload()
   },
 

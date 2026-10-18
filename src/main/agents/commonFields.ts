@@ -50,3 +50,11 @@ export const HIDE_THINKING_BLOCK_FIELD: ConfigFieldDef = {
   label: '隐藏思考块',
   desc: '在对话记录里隐藏思考内容'
 }
+
+/** 用终端原生光标替代自绘光标（输入法场景更稳）；pi 与 omp 同名同义 */
+export const SHOW_HARDWARE_CURSOR_FIELD: ConfigFieldDef = {
+  key: 'showHardwareCursor',
+  type: 'boolean',
+  label: '使用终端光标',
+  desc: '用终端原生光标替代自绘光标（输入法场景更稳）'
+}

@@ -49,6 +49,7 @@ export default function App(): React.JSX.Element {
     error,
     agentOrder,
     hiddenAgents,
+    initialized,
     setAgent,
     setPage,
     init,
@@ -132,10 +133,21 @@ export default function App(): React.JSX.Element {
                 </div>
               </div>
             </div>
-            {/* 分段控件：滑块滑动到目标位置，而不是两个背景瞬间交换 */}
-            <div className="bg-muted relative flex rounded-[10px] p-1" aria-label="选择 Agent">
+            {/* 分段控件：滑块滑动到目标位置，而不是两个背景瞬间交换。
+                初始化完成前整块不可见：首帧的 agent 还是写死的 omp，
+                渲染出来会先显示 omp 选中再跳到顺序第一个，看起来像切换了一下 */}
+            <div
+              className={cn('bg-muted relative flex rounded-[10px] p-1', !initialized && 'invisible')}
+              aria-label="选择 Agent"
+              {...(!initialized ? { 'aria-hidden': true } : {})}
+            >
               <div
-                className="bg-card absolute inset-y-1 left-1 w-28 rounded-lg shadow-sm transition-transform duration-300 [transition-timing-function:var(--ease-fluid)]"
+                className={cn(
+                  'bg-card absolute inset-y-1 left-1 w-28 rounded-lg shadow-sm',
+                  // 过渡只在初始化完成后启用，进一步兜底首帧不播滑动动画
+                  initialized &&
+                    'transition-transform duration-300 [transition-timing-function:var(--ease-fluid)]'
+                )}
                 style={{ transform: `translateX(${agentIndex * 7}rem)` }}
                 aria-hidden="true"
               />
@@ -188,10 +200,14 @@ export default function App(): React.JSX.Element {
 
             {/* 滚动交给各页面内容区，让页面头部/工具栏保持固定 */}
             <main className="min-w-0 flex-1 overflow-hidden">
-              {/* 页面切换：淡入 + 轻微上移，key 变化触发重新入场 */}
+              {/* 页面切换：淡入 + 轻微上移，key 变化触发重新入场；初始化落定前不播动画，避免启动时重播 */}
               <div
                 key={`${agent}/${page}`}
-                className="animate-in fade-in slide-in-from-bottom-2 flex h-full min-h-0 flex-col px-7 pt-6 duration-300 [animation-timing-function:var(--ease-fluid)]"
+                className={cn(
+                  'flex h-full min-h-0 flex-col px-7 pt-6',
+                  initialized &&
+                    'animate-in fade-in slide-in-from-bottom-2 duration-300 [animation-timing-function:var(--ease-fluid)]'
+                )}
               >
                 {/* Agent 未安装提示 */}
                 {currentStatus && !currentStatus.installed && (

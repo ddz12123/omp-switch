@@ -20,15 +20,21 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import ConfirmDialog from './ConfirmDialog'
 
-/** Pi models.json 当前支持的 API 类型。 */
+/** Pi models.json 支持的 API 类型（pi-ai KnownApi 全集 10 种，api 字段为自由字符串均可写） */
 const PI_API_OPTIONS = [
   'openai-completions',
   'openai-responses',
   'anthropic-messages',
-  'google-generative-ai'
+  'google-generative-ai',
+  'azure-openai-responses',
+  'openai-codex-responses',
+  'google-vertex',
+  'bedrock-converse-stream',
+  'mistral-conversations',
+  'pi-messages'
 ]
 
-/** OMP models.yml 当前支持的 API 类型（omp config list 的 provider api 全集）。 */
+/** OMP models.yml 支持的 API 类型（omp 18.x KnownApi 16 种 + judge/runner 类 2 种） */
 const OMP_API_OPTIONS = [
   'anthropic-messages',
   'openai-completions',
@@ -39,22 +45,99 @@ const OMP_API_OPTIONS = [
   'google-vertex',
   'google-gemini-cli',
   'bedrock-converse-stream',
+  'openrouter',
+  'ollama-chat',
+  'cursor-agent',
+  'factory-droid-agent',
+  'gitlab-duo-agent',
+  'devin-agent',
+  'apple-foundation-models',
   'openrouter-decisions',
   'typesafe'
 ]
 
 /**
- * 这些 api 由 omp 内置托管（Bedrock 走 AWS 链、Gemini CLI 走本机登录、
- * typesafe / openrouter-decisions 走 omp 判定服务），没有自定义模型时可不填 baseUrl。
+ * 自带认证、不走自定义 Base URL 的 api：Bedrock 走 AWS 链、Vertex 走 GCP、
+ * Gemini CLI / Codex / 各类 agent 包装走各自登录，typesafe / openrouter-decisions 走判定服务。
+ * 选中这些 api 时即使添加了自定义模型也不强制要求 Base URL（pi / omp 通用）。
  */
-const OMP_OPTIONAL_BASE_URL_APIS = new Set([
+const OPTIONAL_BASE_URL_APIS = new Set([
   'bedrock-converse-stream',
+  'google-vertex',
   'google-gemini-cli',
+  'openai-codex-responses',
+  'cursor-agent',
+  'factory-droid-agent',
+  'gitlab-duo-agent',
+  'devin-agent',
+  'apple-foundation-models',
   'typesafe',
   'openrouter-decisions'
 ])
 const DISCOVERY_TYPES = ['ollama', 'llamacpp', 'lmstudio', 'vllm', 'sglang', 'kilo']
 const TRANSPORT_TYPES = ['pi-native']
+
+/** 一个数值快捷档位：label 用于展示，value 为写入配置的真实数字 */
+interface NumberPreset {
+  label: string
+  value: number
+}
+
+/** 常用上下文窗口档位（点击即填入，省得手敲 128000 这类数字） */
+const CONTEXT_WINDOW_PRESETS: NumberPreset[] = [
+  { label: '128k', value: 128_000 },
+  { label: '200k', value: 200_000 },
+  { label: '256k', value: 256_000 },
+  { label: '500k', value: 500_000 },
+  { label: '1M', value: 1_000_000 }
+]
+
+/** 常用最大输出档位 */
+const MAX_TOKENS_PRESETS: NumberPreset[] = [
+  { label: '4k', value: 4_096 },
+  { label: '8k', value: 8_192 },
+  { label: '16k', value: 16_384 },
+  { label: '32k', value: 32_768 },
+  { label: '64k', value: 65_536 }
+]
+
+/** 档位胶囊：当前值命中某个档位时高亮，未命中则全部置灰（自定义值） */
+function PresetChips({
+  presets,
+  value,
+  label,
+  onSelect
+}: {
+  presets: NumberPreset[]
+  value: number | ''
+  label: string
+  onSelect: (value: number) => void
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-wrap gap-1" role="group" aria-label={`${label} 快捷档位`}>
+      {presets.map((preset) => {
+        const active = value === preset.value
+        return (
+          <button
+            key={preset.label}
+            type="button"
+            aria-pressed={active}
+            title={`${preset.label}（${preset.value.toLocaleString('en-US')}）`}
+            onClick={() => onSelect(preset.value)}
+            className={cn(
+              'rounded-full px-1.5 py-0.5 text-[11px] leading-4 font-medium tabular-nums transition-colors',
+              active
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground'
+            )}
+          >
+            {preset.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 interface ProviderDialogProps {
   agent: AgentId
@@ -124,12 +207,10 @@ function parseObjectField(
   }
 }
 
-function requiresBaseUrl(agent: AgentId, provider: Provider): boolean {
+function requiresBaseUrl(provider: Provider): boolean {
   if ((provider.models?.length ?? 0) === 0) return false
   return !(
-    agent === 'omp' &&
-    typeof provider.api === 'string' &&
-    OMP_OPTIONAL_BASE_URL_APIS.has(provider.api)
+    typeof provider.api === 'string' && OPTIONAL_BASE_URL_APIS.has(provider.api)
   )
 }
 
@@ -255,14 +336,22 @@ function ModelFields({
           )}
         </div>
       </div>
-      <div className={cn('grid gap-3', agent === 'omp' ? 'grid-cols-3' : 'grid-cols-2')}>
+      {/* 带档位胶囊的字段固定一行 2 个：3 列时胶囊会换行并把输入框顶下去 */}
+      <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
         <div className="grid gap-1">
           <Label htmlFor={`${fieldId}-context`} className="text-muted-foreground text-xs">
             contextWindow
           </Label>
+          <PresetChips
+            presets={CONTEXT_WINDOW_PRESETS}
+            value={model.contextWindow ?? ''}
+            label="contextWindow"
+            onSelect={(value) => setNumber('contextWindow', String(value))}
+          />
           <Input
             id={`${fieldId}-context`}
             type="number"
+            inputMode="numeric"
             value={model.contextWindow ?? ''}
             onChange={(e) => setNumber('contextWindow', e.target.value)}
             placeholder="255000"
@@ -272,33 +361,24 @@ function ModelFields({
           <Label htmlFor={`${fieldId}-tokens`} className="text-muted-foreground text-xs">
             maxTokens
           </Label>
+          <PresetChips
+            presets={MAX_TOKENS_PRESETS}
+            value={model.maxTokens ?? ''}
+            label="maxTokens"
+            onSelect={(value) => setNumber('maxTokens', String(value))}
+          />
           <Input
             id={`${fieldId}-tokens`}
             type="number"
+            inputMode="numeric"
             value={model.maxTokens ?? ''}
             onChange={(e) => setNumber('maxTokens', e.target.value)}
             placeholder="32768"
           />
         </div>
-        {agent === 'omp' && (
-          <div className="grid gap-1">
-            <Label htmlFor={`${fieldId}-premium`} className="text-muted-foreground text-xs">
-              premiumMultiplier
-            </Label>
-            <Input
-              id={`${fieldId}-premium`}
-              type="number"
-              min="0"
-              step="0.01"
-              value={numberValue(model.premiumMultiplier)}
-              onChange={(e) => setNumber('premiumMultiplier', e.target.value)}
-              placeholder="可选"
-            />
-          </div>
-        )}
       </div>
       {agent === 'omp' && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="grid gap-1">
             <Label htmlFor={`${fieldId}-promotion`} className="text-muted-foreground text-xs">
               contextPromotionTarget
@@ -321,7 +401,21 @@ function ModelFields({
               placeholder="provider/model 或模型 id"
             />
           </div>
-          <label className="col-span-2 flex items-center gap-2 text-sm">
+          <div className="grid gap-1">
+            <Label htmlFor={`${fieldId}-premium`} className="text-muted-foreground text-xs">
+              premiumMultiplier
+            </Label>
+            <Input
+              id={`${fieldId}-premium`}
+              type="number"
+              min="0"
+              step="0.01"
+              value={numberValue(model.premiumMultiplier)}
+              onChange={(e) => setNumber('premiumMultiplier', e.target.value)}
+              placeholder="可选"
+            />
+          </div>
+          <label className="col-span-full flex items-center gap-2 text-sm">
             <Switch
               aria-label="省略最大输出 token 参数"
               checked={model.omitMaxOutputTokens === true}
@@ -426,7 +520,7 @@ export default function ProviderDialog({
 
   const models = provider.models ?? []
   const apiOptions = apiOptionsFor(agent)
-  const baseUrlRequired = requiresBaseUrl(agent, provider)
+  const baseUrlRequired = requiresBaseUrl(provider)
   const discovery = objectValue(provider.discovery)
 
   const setField = (key: string, value: unknown): void => {
@@ -449,6 +543,18 @@ export default function ProviderDialog({
   const setModels = (next: ModelDef[]): void => {
     setProvider((current) => ({ ...current, models: next }))
     setFormError(null)
+  }
+
+  /** 复制当前 API Key（隐藏状态也可复制，值取自表单而非 DOM） */
+  const copyApiKey = async (): Promise<void> => {
+    const value = provider.apiKey ?? ''
+    if (!value) return
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success('API Key 已复制')
+    } catch (error) {
+      toast.error(`复制失败：${errorMessage(error)}`)
+    }
   }
 
   const addModel = (): void => {
@@ -639,7 +745,7 @@ export default function ProviderDialog({
                 </SelectContent>
               </Select>
               <p className="text-muted-foreground text-xs">
-                {agent === 'omp' ? 'OMP 支持 9 类 API' : 'Pi models.json 支持 4 类 API'}
+                {agent === 'omp' ? 'OMP 可选 18 类 API' : 'Pi models.json 可选 10 类 API'}
               </p>
             </div>
           </div>
@@ -660,7 +766,8 @@ export default function ProviderDialog({
               aria-describedby="p-url-help"
             />
             <p id="p-url-help" className="text-muted-foreground text-xs">
-              有自定义模型时通常必填；仅覆盖内置供应商，或使用 Bedrock / Gemini CLI 时可留空。
+              有自定义模型时通常必填；仅覆盖内置供应商，或使用 Bedrock / Vertex / Gemini CLI /
+              Codex 等自带认证的 API 时可留空。
             </p>
           </div>
 
@@ -691,6 +798,17 @@ export default function ProviderDialog({
                 placeholder="sk-... 或环境变量命令"
                 className="font-mono"
               />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                disabled={!provider.apiKey}
+                onClick={() => void copyApiKey()}
+                aria-label="复制 API Key"
+                title="复制 API Key"
+              >
+                <Copy aria-hidden="true" />
+              </Button>
               <Button
                 type="button"
                 variant="outline"
