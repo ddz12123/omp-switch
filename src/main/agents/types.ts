@@ -40,4 +40,3 @@ export interface AgentAdapter {
   readSwitchState(): Promise<SwitchState>
   writeSwitchState(state: SwitchState): Promise<void>
 }
-

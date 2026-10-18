@@ -2,12 +2,7 @@ import { existsSync, readdirSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { parseDocument, Document } from 'yaml'
-import type {
-  OmpProfileInfo,
-  ProviderMap,
-  RuleFileSpec,
-  SwitchState
-} from '../../shared/types'
+import type { OmpProfileInfo, ProviderMap, RuleFileSpec, SwitchState } from '../../shared/types'
 import { OMP_EFFORT_LEVELS } from '../../shared/types'
 import { formatModelRef, parseModelRef } from '../../shared/modelRef'
 import { readTextFile, writeTextFileSafe } from '../lib/fileio'

@@ -1,0 +1,14 @@
+#!/bin/sh
+# 提交前只做一件事：把暂存区的文件过一遍 prettier，再把结果重新加回暂存区。
+# 不跑 lint / typecheck；prettier 报错（语法错误等）才中断提交。
+
+PRETTIER=./node_modules/.bin/prettier
+[ -x "$PRETTIER" ] || exit 0
+
+git diff --cached --name-only --diff-filter=ACMR -z -- \
+  '*.ts' '*.tsx' '*.js' '*.mjs' '*.cjs' '*.json' '*.css' '*.html' '*.md' '*.yml' '*.yaml' |
+  xargs -0 -r "$PRETTIER" --write || exit 1
+
+git diff --cached --name-only --diff-filter=ACMR -z -- \
+  '*.ts' '*.tsx' '*.js' '*.mjs' '*.cjs' '*.json' '*.css' '*.html' '*.md' '*.yml' '*.yaml' |
+  xargs -0 -r git add --

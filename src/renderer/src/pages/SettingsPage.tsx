@@ -251,8 +251,7 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
   const [ompProfiles, setOmpProfiles] = useState<OmpProfileInfo[]>([])
   /** null = 跟随主进程状态；手动切换后先本地覆盖，避免等下一次 statuses 刷新 */
   const [ompProfileOverride, setOmpProfileOverride] = useState<string | null>(null)
-  const ompProfile =
-    ompProfileOverride ?? statuses.find((s) => s.id === 'omp')?.profile ?? ''
+  const ompProfile = ompProfileOverride ?? statuses.find((s) => s.id === 'omp')?.profile ?? ''
   const [ompProfileBusy, setOmpProfileBusy] = useState(false)
   const loadOmpProfiles = useCallback((): Promise<void> => {
     return window.api
@@ -263,7 +262,6 @@ export default function SettingsPage({ onBack }: { onBack?: () => void }): React
   useEffect(() => {
     void loadOmpProfiles()
   }, [loadOmpProfiles])
-
 
   const handleOmpProfileChange = async (value: string): Promise<void> => {
     setOmpProfileBusy(true)

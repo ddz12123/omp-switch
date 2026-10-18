@@ -42,7 +42,8 @@
     "build:unpack": "pnpm run build && electron-builder --dir",
     "build:win": "pnpm run build && electron-builder --win",
     "build:mac": "pnpm run build && electron-builder --mac",
-    "build:linux": "pnpm run build && electron-builder --linux"
+    "build:linux": "pnpm run build && electron-builder --linux",
+    "prepare": "husky"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
@@ -86,6 +87,7 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
+    "husky": "^9.1.7",
     "prettier": "^3.7.4",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",

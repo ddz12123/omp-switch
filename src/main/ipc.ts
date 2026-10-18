@@ -15,7 +15,13 @@ import type {
   SwitchState
 } from '../shared/types'
 import type { FetchRemoteModelsPayload } from '../shared/api'
-import { getAdapter, getAgentStatuses, getOmpProfile, listOmpProfiles, setOmpProfile } from './agents'
+import {
+  getAdapter,
+  getAgentStatuses,
+  getOmpProfile,
+  listOmpProfiles,
+  setOmpProfile
+} from './agents'
 import { fetchRemoteModels } from './remoteModels'
 import { getCliVersions } from './cliVersion'
 import {

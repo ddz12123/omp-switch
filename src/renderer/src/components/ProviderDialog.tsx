@@ -209,9 +209,7 @@ function parseObjectField(
 
 function requiresBaseUrl(provider: Provider): boolean {
   if ((provider.models?.length ?? 0) === 0) return false
-  return !(
-    typeof provider.api === 'string' && OPTIONAL_BASE_URL_APIS.has(provider.api)
-  )
+  return !(typeof provider.api === 'string' && OPTIONAL_BASE_URL_APIS.has(provider.api))
 }
 
 function setUnknownField<T extends Record<string, unknown>>(
@@ -766,8 +764,8 @@ export default function ProviderDialog({
               aria-describedby="p-url-help"
             />
             <p id="p-url-help" className="text-muted-foreground text-xs">
-              有自定义模型时通常必填；仅覆盖内置供应商，或使用 Bedrock / Vertex / Gemini CLI /
-              Codex 等自带认证的 API 时可留空。
+              有自定义模型时通常必填；仅覆盖内置供应商，或使用 Bedrock / Vertex / Gemini CLI / Codex
+              等自带认证的 API 时可留空。
             </p>
           </div>
 

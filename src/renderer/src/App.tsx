@@ -137,7 +137,10 @@ export default function App(): React.JSX.Element {
                 初始化完成前整块不可见：首帧的 agent 还是写死的 omp，
                 渲染出来会先显示 omp 选中再跳到顺序第一个，看起来像切换了一下 */}
             <div
-              className={cn('bg-muted relative flex rounded-[10px] p-1', !initialized && 'invisible')}
+              className={cn(
+                'bg-muted relative flex rounded-[10px] p-1',
+                !initialized && 'invisible'
+              )}
               aria-label="选择 Agent"
               {...(!initialized ? { 'aria-hidden': true } : {})}
             >
