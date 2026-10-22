@@ -1,5 +1,16 @@
-import { useId, useRef, useState } from 'react'
-import { Check, ChevronRight, CloudDownload, Copy, Eye, EyeOff, Plus, Trash2 } from 'lucide-react'
+import { useId, useMemo, useRef, useState } from 'react'
+import {
+  Check,
+  ChevronRight,
+  CloudDownload,
+  Copy,
+  Eye,
+  EyeOff,
+  Plus,
+  Search,
+  Trash2,
+  X
+} from 'lucide-react'
 import { toast } from 'sonner'
 import type { AgentId, ModelDef, Provider } from '@shared/types'
 import { errorMessage } from '../stores/app'
@@ -511,12 +522,19 @@ export default function ProviderDialog({
   const [expanded, setExpanded] = useState<number | null>(null)
   const [fetching, setFetching] = useState(false)
   const [fetched, setFetched] = useState<string[] | null>(null)
+  const [modelQuery, setModelQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [draft, setDraft] = useState<ModelDef | null>(null)
   const [draftError, setDraftError] = useState<string | null>(null)
   const nameRef = useRef<HTMLInputElement>(null)
 
   const models = provider.models ?? []
+  /** 发现弹框内的模型搜索：只影响勾选列表的可见项，搜索框固定不滚动 */
+  const visibleFetched = useMemo(() => {
+    const keyword = modelQuery.trim().toLowerCase()
+    if (!keyword) return fetched ?? []
+    return (fetched ?? []).filter((id) => id.toLowerCase().includes(keyword))
+  }, [fetched, modelQuery])
   const apiOptions = apiOptionsFor(agent)
   const baseUrlRequired = requiresBaseUrl(provider)
   const discovery = objectValue(provider.discovery)
@@ -601,6 +619,7 @@ export default function ProviderDialog({
       } else {
         setFetched(ids)
         setSelected(new Set())
+        setModelQuery('')
       }
     } catch (error) {
       setFetchError(`获取模型列表失败：${errorMessage(error)}`)
@@ -625,6 +644,21 @@ export default function ProviderDialog({
       .map<ModelDef>((id) => ({ id }))
     setModels([...models, ...additions])
     setFetched(null)
+    setModelQuery('')
+  }
+
+  /** 全选 / 清空当前搜索结果（已添加过的跳过） */
+  const toggleSelectAllVisible = (): void => {
+    const selectable = visibleFetched.filter((id) => !models.some((model) => model.id === id))
+    setSelected((previous) => {
+      const allSelected = selectable.length > 0 && selectable.every((id) => previous.has(id))
+      const next = new Set(previous)
+      for (const id of selectable) {
+        if (allSelected) next.delete(id)
+        else next.add(id)
+      }
+      return next
+    })
   }
 
   const buildProvider = (): ParsedProvider => {
@@ -1130,54 +1164,127 @@ export default function ProviderDialog({
 
         {fetched && (
           <Dialog open onOpenChange={(open) => !open && setFetched(null)}>
-            <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-md">
-              <DialogHeader>
+            {/* 固定高度：避免搜索过滤后列表变短导致弹框高度跳动
+                （列表本身短时底部留白，而不是弹框缩小） */}
+            <DialogContent className="flex h-[min(78dvh,40rem)] max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-md">
+              <DialogHeader className="shrink-0">
                 <DialogTitle>选择要添加的模型</DialogTitle>
                 <DialogDescription>
                   共 {fetched.length} 个，已添加过的不可重复勾选
                 </DialogDescription>
               </DialogHeader>
-              <div className="-mr-4 min-h-0 flex-1 overflow-y-auto pr-4 pb-4">
-                <div className="flex flex-col gap-1.5" role="listbox" aria-multiselectable="true">
-                  {fetched.map((id) => {
-                    const added = models.some((model) => model.id === id)
-                    const checked = selected.has(id)
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        role="option"
-                        aria-selected={checked}
-                        disabled={added}
-                        onClick={() => toggleSelected(id)}
-                        className={cn(
-                          'flex items-center gap-2.5 rounded-md border px-3 py-2 text-left font-mono text-sm transition-colors',
-                          added
-                            ? 'text-muted-foreground/60 cursor-not-allowed border-dashed'
-                            : checked
-                              ? 'border-primary/50 bg-muted/60'
-                              : 'hover:bg-muted/40'
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            'flex size-4 shrink-0 items-center justify-center rounded border',
-                            checked && !added && 'bg-primary border-primary text-primary-foreground'
-                          )}
-                          aria-hidden="true"
-                        >
-                          {checked && !added && <Check className="size-3" />}
-                        </span>
-                        <span className="truncate">{id}</span>
-                        {added && (
-                          <span className="text-muted-foreground ml-auto shrink-0 text-xs">
-                            已添加
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
+              {/* 搜索区固定：不随模型列表滚动 */}
+              <div className="flex shrink-0 flex-col gap-2">
+                <div className="relative">
+                  <Search
+                    className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+                    aria-hidden="true"
+                  />
+                  <label htmlFor="provider-model-search" className="sr-only">
+                    搜索模型
+                  </label>
+                  <Input
+                    id="provider-model-search"
+                    value={modelQuery}
+                    onChange={(event) => setModelQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape' && modelQuery) {
+                        event.stopPropagation()
+                        setModelQuery('')
+                      }
+                    }}
+                    placeholder="搜索模型 id"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="pr-9 pl-8"
+                  />
+                  {modelQuery && (
+                    <button
+                      type="button"
+                      aria-label="清空搜索"
+                      title="清空搜索"
+                      onClick={() => setModelQuery('')}
+                      className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 rounded-sm p-0.5"
+                    >
+                      <X className="size-4" aria-hidden="true" />
+                    </button>
+                  )}
                 </div>
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-muted-foreground">
+                    {modelQuery.trim()
+                      ? `匹配 ${visibleFetched.length} / ${fetched.length} 个`
+                      : `已选 ${selected.size} 个`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={toggleSelectAllVisible}
+                    disabled={visibleFetched.length === 0}
+                    className="text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    {visibleFetched.length > 0 &&
+                    visibleFetched
+                      .filter((id) => !models.some((model) => model.id === id))
+                      .every((id) => selected.has(id))
+                      ? '清空选择'
+                      : '全选'}
+                  </button>
+                </div>
+              </div>
+              {/* 只有模型列表滚动 */}
+              <div className="-mr-4 min-h-0 flex-1 overflow-y-auto pr-4 pb-1">
+                {visibleFetched.length === 0 ? (
+                  <div className="flex h-full items-center justify-center">
+                    <p className="text-muted-foreground px-4 text-center text-sm">
+                      {modelQuery.trim()
+                        ? `没有匹配「${modelQuery.trim()}」的模型`
+                        : '模型列表为空'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1.5" role="listbox" aria-multiselectable="true">
+                    {visibleFetched.map((id) => {
+                      const added = models.some((model) => model.id === id)
+                      const checked = selected.has(id)
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          role="option"
+                          aria-selected={checked}
+                          disabled={added}
+                          onClick={() => toggleSelected(id)}
+                          className={cn(
+                            'flex items-center gap-2.5 rounded-md border px-3 py-2 text-left font-mono text-sm transition-colors',
+                            added
+                              ? 'text-muted-foreground/60 cursor-not-allowed border-dashed'
+                              : checked
+                                ? 'border-primary/50 bg-muted/60'
+                                : 'hover:bg-muted/40'
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'flex size-4 shrink-0 items-center justify-center rounded border',
+                              checked &&
+                                !added &&
+                                'bg-primary border-primary text-primary-foreground'
+                            )}
+                            aria-hidden="true"
+                          >
+                            {checked && !added && <Check className="size-3" />}
+                          </span>
+                          <span className="truncate">{id}</span>
+                          {added && (
+                            <span className="text-muted-foreground ml-auto shrink-0 text-xs">
+                              已添加
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
               <DialogFooter className="shrink-0 pt-2 pb-1">
                 <Button type="button" variant="outline" onClick={() => setFetched(null)}>

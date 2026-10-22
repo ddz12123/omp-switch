@@ -1,17 +1,30 @@
 import { useState } from 'react'
-import { Copy, ExternalLink, FileCode, FolderOpen, Pencil, Play, Plus, Trash2 } from 'lucide-react'
+import {
+  Copy,
+  ExternalLink,
+  FileCode,
+  FolderOpen,
+  Pencil,
+  Play,
+  Plus,
+  Send,
+  Trash2
+} from 'lucide-react'
 import type { Provider } from '@shared/types'
 import { useApp } from '../stores/app'
 import { getWebsite, removeWebsite, setWebsite } from '../lib/websites'
+import { agentLabel, otherAgentOf, uniqueName } from '../lib/providerTransfer'
 import { cn } from '../lib/utils'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 import ProviderDialog from '../components/ProviderDialog'
+import CopyProviderDialog from '../components/CopyProviderDialog'
 import ConfirmDialog from '../components/ConfirmDialog'
 import ConfigFileDialog from '../components/ConfigFileDialog'
 
 export default function ProvidersPage(): React.JSX.Element {
-  const { agent, providers, switchState, saveProviders, saveSwitch, reload } = useApp()
+  const { agent, providers, switchState, saveProviders, saveSwitch, importProvider, reload } =
+    useApp()
   const [dialogOpen, setDialogOpen] = useState(false)
   /** null = 新增，否则为正在编辑的 provider 名 */
   const [editingName, setEditingName] = useState<string | null>(null)
@@ -19,6 +32,10 @@ export default function ProvidersPage(): React.JSX.Element {
   const [deletingName, setDeletingName] = useState<string | null>(null)
   /** 原始配置文件编辑弹框开关 */
   const [rawOpen, setRawOpen] = useState(false)
+  /** 待「复制到其他 Agent」的供应商名（非 null 时显示确认框） */
+  const [transferName, setTransferName] = useState<string | null>(null)
+  /** 目标侧最终使用的名字（重名时自动加 -copy 后缀），确认框展示用 */
+  const [resolvedName, setResolvedName] = useState('')
 
   const providerNames = Object.keys(providers)
 
@@ -93,6 +110,27 @@ export default function ProvidersPage(): React.JSX.Element {
     return saveProviders(next)
   }
 
+  /** 另一个 Agent（pi ⇄ omp 互为唯一目标） */
+  const otherAgent = otherAgentOf(agent)
+
+  /** 点「复制到其他 Agent」：先算好目标侧名字（重名加后缀），供确认框预览 */
+  const openTransfer = async (name: string): Promise<void> => {
+    let taken: string[] = []
+    try {
+      taken = Object.keys(await window.api.readProviders(otherAgent))
+    } catch {
+      // 读不到就按原名走，store 里写入时还会再算一次，不会覆盖已有配置
+    }
+    setResolvedName(uniqueName(name, taken))
+    setTransferName(name)
+  }
+
+  /** 执行复制并关闭确认框 */
+  const confirmTransfer = async (name: string): Promise<void> => {
+    const ok = await importProvider(otherAgent, name)
+    if (ok) setTransferName(null)
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-5">
       <div className="flex shrink-0 items-center justify-between">
@@ -126,115 +164,127 @@ export default function ProvidersPage(): React.JSX.Element {
           还没有供应商，点击右上角「添加供应商」创建第一个
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1 pb-6">
-          {providerNames.map((name) => {
-            const provider = providers[name]
-            const roles = usedBy(name)
-            const models = provider.models ?? []
-            const website = getWebsite(agent, name)
-            /** 所有角色都在用该供应商才算完全启用 */
-            const isActive = roleCount > 0 && roles.length === roleCount
-            return (
-              <div
-                key={name}
-                className={cn(
-                  'group bg-card flex items-center gap-4 rounded-xl border p-5 shadow-xs transition-all duration-200 [transition-timing-function:var(--ease-fluid)]',
-                  isActive
-                    ? 'border-primary/30 ring-primary/15 ring-1'
-                    : 'border-black/[0.06] hover:-translate-y-0.5 hover:shadow-md dark:border-white/[0.08]'
-                )}
-              >
-                {/* 字母头像 */}
-                <div className="bg-muted text-foreground/70 flex size-12 shrink-0 items-center justify-center rounded-xl border text-lg font-bold uppercase">
-                  {name.charAt(0)}
-                </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1 pb-6">
+            {providerNames.map((name) => {
+              const provider = providers[name]
+              const roles = usedBy(name)
+              const models = provider.models ?? []
+              const website = getWebsite(agent, name)
+              /** 所有角色都在用该供应商才算完全启用 */
+              const isActive = roleCount > 0 && roles.length === roleCount
+              return (
+                <div
+                  key={name}
+                  className={cn(
+                    'group bg-card flex items-center gap-4 rounded-xl border p-5 shadow-xs transition-all duration-200 [transition-timing-function:var(--ease-fluid)]',
+                    isActive
+                      ? 'border-primary/30 ring-primary/15 ring-1'
+                      : 'border-black/[0.06] hover:-translate-y-0.5 hover:shadow-md dark:border-white/[0.08]'
+                  )}
+                >
+                  {/* 字母头像 */}
+                  <div className="bg-muted text-foreground/70 flex size-12 shrink-0 items-center justify-center rounded-xl border text-lg font-bold uppercase">
+                    {name.charAt(0)}
+                  </div>
 
-                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-base font-semibold">{name}</span>
-                    {provider.api && (
-                      <Badge
-                        variant="secondary"
-                        className="text-muted-foreground px-2 text-xs font-normal"
+                  <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-base font-semibold">{name}</span>
+                      {provider.api && (
+                        <Badge
+                          variant="secondary"
+                          className="text-muted-foreground px-2 text-xs font-normal"
+                        >
+                          {provider.api}
+                        </Badge>
+                      )}
+                      {roles.length > 0 && (
+                        <Badge variant="success" className="px-2 text-xs">
+                          使用中 · {roles.join('/')}
+                        </Badge>
+                      )}
+                    </div>
+                    {/* 有官网显示可点击链接；否则退回展示 baseUrl（纯文本，不是官网） */}
+                    {website ? (
+                      <button
+                        type="button"
+                        className="flex min-w-0 items-center gap-1 self-start text-sm text-sky-600 hover:underline dark:text-sky-400"
+                        title="在浏览器中打开官网"
+                        onClick={() => void window.api.openExternal(website)}
                       >
-                        {provider.api}
-                      </Badge>
+                        <span className="truncate">{website}</span>
+                        <ExternalLink className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+                      </button>
+                    ) : (
+                      <span
+                        className="text-muted-foreground truncate font-mono text-sm"
+                        title="API 地址（编辑供应商可填写官网）"
+                      >
+                        {provider.baseUrl ?? '（未设置 baseUrl）'}
+                      </span>
                     )}
-                    {roles.length > 0 && (
-                      <Badge variant="success" className="px-2 text-xs">
-                        使用中 · {roles.join('/')}
-                      </Badge>
-                    )}
+                    <div className="text-muted-foreground truncate font-mono text-xs">
+                      {models.length === 0 ? '暂无模型' : models.map((m) => m.id).join(' · ')}
+                    </div>
                   </div>
-                  {/* 有官网显示可点击链接；否则退回展示 baseUrl（纯文本，不是官网） */}
-                  {website ? (
-                    <button
-                      type="button"
-                      className="flex min-w-0 items-center gap-1 self-start text-sm text-sky-600 hover:underline dark:text-sky-400"
-                      title="在浏览器中打开官网"
-                      onClick={() => void window.api.openExternal(website)}
-                    >
-                      <span className="truncate">{website}</span>
-                      <ExternalLink className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
-                    </button>
-                  ) : (
-                    <span
-                      className="text-muted-foreground truncate font-mono text-sm"
-                      title="API 地址（编辑供应商可填写官网）"
-                    >
-                      {provider.baseUrl ?? '（未设置 baseUrl）'}
-                    </span>
-                  )}
-                  <div className="text-muted-foreground truncate font-mono text-xs">
-                    {models.length === 0 ? '暂无模型' : models.map((m) => m.id).join(' · ')}
-                  </div>
-                </div>
 
-                {/* 操作区：hover 浮现，避免视觉噪音 */}
-                <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
-                  {!isActive && (
+                  {/* 操作区：hover 浮现，避免视觉噪音 */}
+                  <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+                    {!isActive && (
+                      <Button
+                        size="sm"
+                        className="mr-1 rounded-full px-4"
+                        disabled={models.length === 0}
+                        title={models.length === 0 ? '请先添加模型' : '所有角色切换到该供应商'}
+                        onClick={() => enableProvider(name)}
+                      >
+                        <Play className="size-3.5" />
+                        启用
+                      </Button>
+                    )}
                     <Button
-                      size="sm"
-                      className="mr-1 rounded-full px-4"
-                      disabled={models.length === 0}
-                      title={models.length === 0 ? '请先添加模型' : '所有角色切换到该供应商'}
-                      onClick={() => enableProvider(name)}
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-foreground size-9"
+                      title="编辑"
+                      onClick={() => openEdit(name)}
                     >
-                      <Play className="size-3.5" />
-                      启用
+                      <Pencil />
                     </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-foreground size-9"
-                    title="编辑"
-                    onClick={() => openEdit(name)}
-                  >
-                    <Pencil />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-foreground size-9"
-                    title="复制"
-                    onClick={() => void copyProvider(name)}
-                  >
-                    <Copy />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-destructive size-9"
-                    title="删除"
-                    onClick={() => setDeletingName(name)}
-                  >
-                    <Trash2 />
-                  </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-foreground size-9"
+                      title="复制"
+                      onClick={() => void copyProvider(name)}
+                    >
+                      <Copy />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-foreground size-9"
+                      title={`复制到 ${agentLabel(otherAgent)}`}
+                      aria-label={`复制供应商 ${name} 到 ${agentLabel(otherAgent)}`}
+                      onClick={() => void openTransfer(name)}
+                    >
+                      <Send />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-destructive size-9"
+                      title="删除"
+                      onClick={() => setDeletingName(name)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
       )}
 
@@ -260,6 +310,18 @@ export default function ProvidersPage(): React.JSX.Element {
           }
           onConfirm={() => void confirmDelete(deletingName)}
           onClose={() => setDeletingName(null)}
+        />
+      )}
+
+      {transferName && providers[transferName] && (
+        <CopyProviderDialog
+          from={agent}
+          name={transferName}
+          provider={providers[transferName]}
+          website={getWebsite(agent, transferName)}
+          resolvedName={resolvedName}
+          onCopy={() => confirmTransfer(transferName)}
+          onClose={() => setTransferName(null)}
         />
       )}
 

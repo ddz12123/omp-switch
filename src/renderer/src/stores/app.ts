@@ -14,6 +14,7 @@ import type {
 import { AGENT_IDS } from '@shared/types'
 import { applyTheme, getStoredTheme, storeTheme, type Theme } from '../lib/theme'
 import { getCloseBehavior, storeCloseBehavior, type CloseBehavior } from '../lib/closeBehavior'
+import { agentLabel, pickCoreProvider, uniqueName } from '../lib/providerTransfer'
 
 export type PageId =
   | 'providers'
@@ -107,6 +108,11 @@ interface AppState {
   init: () => Promise<void>
   reload: () => Promise<void>
   saveProviders: (map: ProviderMap, notice?: string) => Promise<boolean>
+  /**
+   * 把当前 Agent 的供应商复制到另一个 Agent（pi ⇄ omp）。
+   * 名字冲突时自动加 -copy 后缀，官网记录一并迁移；返回写入后的实际名字，失败返回 null。
+   */
+  importProvider: (target: AgentId, name: string) => Promise<string | null>
   saveSwitch: (state: SwitchState, notice?: string) => Promise<boolean>
   clearError: () => void
 }
@@ -532,6 +538,44 @@ export const useApp = create<AppState>((set, get) => ({
       set({ switchState: previous })
       toast.error(errorMessage(error))
       return false
+    }
+  },
+
+  /**
+   * 复制供应商到另一个 Agent：带供应商信息（api / baseUrl / apiKey）+ 模型 + 官网。
+   * 同名时自动加 -copy 后缀，不覆盖已有供应商。
+   */
+  importProvider: async (target, name) => {
+    const { agent, providers, websites } = get()
+    const source = providers[name]
+    if (!source) {
+      toast.error(`找不到供应商「${name}」`)
+      return null
+    }
+    const core = pickCoreProvider(source)
+    try {
+      // 先读目标侧最新配置，避免覆盖掉它的其他供应商
+      const targetMap = await window.api.readProviders(target)
+      const newName = uniqueName(name, Object.keys(targetMap))
+      await window.api.writeProviders(target, { ...targetMap, [newName]: core })
+
+      // 官网存在应用配置里，按 agent 分别记录，需要单独挪一份
+      const website = websites[`${agent}/${name}`]
+      if (website) get().updateWebsites({ ...websites, [`${target}/${newName}`]: website })
+
+      const renamed = newName !== name
+      const modelCount = core.models?.length ?? 0
+      const parts = [`${modelCount} 个模型`]
+      if (website) parts.push('含官网')
+      toast.success(
+        renamed
+          ? `已复制「${name}」到 ${agentLabel(target)}，因重名保存为「${newName}」（${parts.join('，')}）`
+          : `已复制「${name}」到 ${agentLabel(target)}（${parts.join('，')}）`
+      )
+      return newName
+    } catch (error) {
+      toast.error(errorMessage(error))
+      return null
     }
   },
 
