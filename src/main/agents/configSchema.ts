@@ -15,8 +15,9 @@ import {
  *
  * 字段清单对照版本（升级 CLI 时手工核对）：
  * - pi：@earendil-works/pi-coding-agent 1.3.x，59 个顶层键（含 $schema，即 58 个配置键），
+ *   1.4.0 复核仍为 59 键（queueMode 已标记 deprecated 迁移至 steeringMode，不收），
  *   权威来源 https://pi.dev/schemas/settings.schema.json（与 npm 包内 schemas/ 逐字节一致）
- * - omp：@oh-my-pi/pi-coding-agent 18.12.x，权威清单 555 键（`omp config list --json`）；
+ * - omp：@oh-my-pi/pi-coding-agent 18.12.x，权威清单 559 键（18.12.6 `omp config list --json`）；
  *   该命令只给 type 不给枚举取值，选项要对照 dist/cli.js 里
  *   `id:"xxx",type:"enum",values:[...]` 的定义
  *
@@ -160,6 +161,13 @@ export const PI_CONFIG_SCHEMA: ConfigFieldGroup[] = [
         label: 'Shell 路径',
         desc: '覆盖 bash 工具使用的 shell 二进制（如 D:\\git\\Git\\bin\\bash.exe）',
         placeholder: 'D:\\git\\Git\\bin\\bash.exe'
+      },
+      {
+        key: 'externalEditor',
+        type: 'string',
+        label: '外部编辑器',
+        desc: 'Ctrl+G 编辑长输入用的命令（如 code --wait），优先于 VISUAL/EDITOR 环境变量',
+        placeholder: 'code --wait'
       },
       {
         key: 'defaultProjectTrust',
@@ -584,7 +592,9 @@ export const OMP_CONFIG_SCHEMA: ConfigFieldGroup[] = [
         type: 'select',
         label: '默认思考等级',
         desc: 'auto 按模型能力自动裁定',
-        options: [...OMP_EFFORT_LEVELS]
+        // 官方枚举只有 minimal..max + auto，不含 off；
+        // off 仅在角色后缀（Provider/model:off）里被解析器接受
+        options: OMP_EFFORT_LEVELS.filter((level) => level !== 'off')
       },
       HIDE_THINKING_BLOCK_FIELD,
       { key: 'expandThinkingBlocks', type: 'boolean', label: '展开思考块' },
@@ -651,8 +661,8 @@ export const OMP_CONFIG_SCHEMA: ConfigFieldGroup[] = [
         key: 'tools.approvalMode',
         type: 'select',
         label: '审批模式',
-        desc: 'always-ask 全部询问；write 自动批准读与写；yolo 全部自动批准',
-        options: ['always-ask', 'write', 'yolo']
+        desc: 'always-ask 只读自动批准、写/执行需确认；always-ask-cached 读写均询问但可记住决定；write 读写自动批准、执行需确认；yolo 全部自动批准',
+        options: ['always-ask', 'always-ask-cached', 'write', 'yolo']
       },
       { key: 'web_search.enabled', type: 'boolean', label: '联网搜索工具' },
       { key: 'checkpoint.enabled', type: 'boolean', label: '检查点/回退工具' },
