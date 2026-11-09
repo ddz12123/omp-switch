@@ -1,197 +1,59 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   ArrowLeft,
-  Copy,
+  ChevronDown,
+  ChevronRight,
+  Clock,
   FileText,
-  FolderOpen,
+  FolderPlus,
+  LayoutList,
   ListChecks,
   RefreshCw,
   Search,
   Trash2
 } from 'lucide-react'
-import type { editor as MonacoEditor } from 'monaco-editor/editor/editor.api.js'
-import type { AgentId, SessionMeta, SessionRaw, SessionRootInfo } from '@shared/types'
-import { AGENT_IDS } from '@shared/types'
-import { loadMonaco } from '../lib/monaco'
-import { errorMessage } from '../stores/app'
+import type { SessionMeta, SessionRootInfo } from '@shared/types'
+import { errorMessage, useApp } from '../stores/app'
 import { cn } from '../lib/utils'
-import { AgentIcon } from '../components/AgentIcon'
+import { formatSize, projectName, relativeTime } from '../lib/format'
+import { SessionReader } from '../components/sessions/SessionReader'
 import ConfirmDialog from '../components/ConfirmDialog'
-import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '../components/ui/select'
 
-/** 相对时间（列表次要行用），超过 30 天退回本地日期 */
-function relativeTime(iso: string): string {
+type SourceFilter = 'all' | 'pi' | 'omp'
+type Grouping = 'project' | 'time'
+
+interface SessionGroup {
+  key: string
+  label: string
+  sessions: SessionMeta[]
+}
+
+const TIME_ORDER = ['今天', '昨天', '近 7 天', '近 30 天', '更早']
+/** 无项目 / 目录名无法表达项目的会话统一归入这个匿名分组 */
+const UNCLASSIFIED_GROUP = '__unclassified__'
+
+function projectGroupKey(cwd: string): string {
+  const trimmed = cwd.trim()
+  if (!trimmed) return UNCLASSIFIED_GROUP
+  const parts = trimmed.split(/[\\/]/).filter(Boolean)
+  const last = parts[parts.length - 1] || ''
+  // 纯数字或过短的目录名（如临时目录「1」「4」）不算一个项目
+  if (!last || last.length <= 2 || /^\d+$/.test(last)) return UNCLASSIFIED_GROUP
+  return trimmed
+}
+
+function timeBucket(iso: string): string {
   const t = new Date(iso).getTime()
-  if (!iso || Number.isNaN(t)) return ''
-  const sec = Math.floor((Date.now() - t) / 1000)
-  if (sec < 60) return '刚刚'
-  if (sec < 3600) return `${Math.floor(sec / 60)} 分钟前`
-  if (sec < 86400) return `${Math.floor(sec / 3600)} 小时前`
-  const day = Math.floor(sec / 86400)
-  if (day < 30) return `${day} 天前`
-  return new Date(t).toLocaleDateString()
-}
-
-/** 详情卡里的绝对时间 */
-function formatDateTime(iso: string): string {
-  const t = new Date(iso).getTime()
-  if (!iso || Number.isNaN(t)) return iso || '—'
-  return new Date(t).toLocaleString()
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-/** 根目录来源徽章文案 */
-function rootBadge(root: SessionRootInfo): string {
-  switch (root.kind) {
-    case 'omp-default':
-      return 'OMP'
-    case 'pi-default':
-      return 'Pi'
-    case 'config-session-dir':
-      return '配置'
-    default:
-      return '自定义'
-  }
-}
-
-/** 会话根目录对应的 Agent（仅默认目录能明确归属，其余返回 null） */
-function rootAgent(root: SessionRootInfo): AgentId | null {
-  if (root.kind === 'omp-default') return 'omp'
-  if (root.kind === 'pi-default') return 'pi'
-  return null
-}
-
-/** 使用 Monaco 只读展示单个会话的原始 JSONL；filePath 变化时整体重挂 */
-function RawViewer({ filePath }: { filePath: string }): React.JSX.Element {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const [raw, setRaw] = useState<SessionRaw | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [editorReady, setEditorReady] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    const timer = window.setTimeout(() => {
-      if (cancelled) return
-      setRaw(null)
-      setError(null)
-      setEditorReady(false)
-      void window.api
-        .readSessionRaw(filePath)
-        .then((r) => {
-          if (!cancelled) setRaw(r)
-        })
-        .catch((e: unknown) => {
-          if (!cancelled) setError(errorMessage(e))
-        })
-    }, 0)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
-  }, [filePath])
-
-  useEffect(() => {
-    if (!raw || !containerRef.current) return undefined
-    let disposed = false
-    let editor: MonacoEditor.IStandaloneCodeEditor | null = null
-
-    setEditorReady(false)
-    void loadMonaco('plaintext')
-      .then((monaco) => {
-        if (disposed || !containerRef.current) return
-        editor = monaco.editor.create(containerRef.current, {
-          value: raw.content,
-          language: 'plaintext',
-          theme: document.documentElement.classList.contains('dark') ? 'vs-dark' : 'vs',
-          readOnly: true,
-          automaticLayout: true,
-          minimap: { enabled: false },
-          fontSize: 12,
-          lineHeight: 18,
-          tabSize: 2,
-          wordWrap: 'on',
-          scrollBeyondLastLine: false,
-          renderLineHighlight: 'none',
-          fixedOverflowWidgets: true,
-          padding: { top: 8, bottom: 8 }
-        })
-        setEditorReady(true)
-      })
-      .catch((e: unknown) => {
-        if (!disposed) setError(`编辑器加载失败：${errorMessage(e)}`)
-      })
-
-    return () => {
-      disposed = true
-      editor?.dispose()
-    }
-  }, [raw])
-
-  if (error) {
-    return (
-      <div
-        className="text-destructive flex h-full items-center justify-center p-4 text-center text-sm"
-        role="alert"
-      >
-        {error}
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
-      {raw?.truncated && (
-        <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-500">
-          文件过大，仅展示前 8MB 内容
-        </div>
-      )}
-      {raw ? (
-        <div className="relative min-h-0 min-w-0 flex-1">
-          <div ref={containerRef} className="h-full" aria-label="会话原始 JSONL" />
-          {!editorReady && (
-            <div
-              className="bg-background/80 text-muted-foreground absolute inset-0 flex items-center justify-center text-sm"
-              role="status"
-            >
-              编辑器加载中…
-            </div>
-          )}
-        </div>
-      ) : (
-        <div
-          className="text-muted-foreground flex h-full items-center justify-center text-sm"
-          role="status"
-        >
-          加载中…
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** 详情卡里的一行元信息 */
-function MetaRow({ label, value }: { label: string; value: string }): React.JSX.Element {
-  return (
-    <div className="grid grid-cols-[5rem_1fr] gap-2">
-      <span className="text-muted-foreground shrink-0 text-xs">{label}</span>
-      <span className="text-foreground/90 min-w-0 break-all text-xs">{value}</span>
-    </div>
-  )
+  if (!iso || Number.isNaN(t)) return '更早'
+  const days = Math.floor((Date.now() - t) / 86400000)
+  if (days < 1) return '今天'
+  if (days < 2) return '昨天'
+  if (days < 7) return '近 7 天'
+  if (days < 30) return '近 30 天'
+  return '更早'
 }
 
 export default function SessionsPage({ onBack }: { onBack?: () => void }): React.JSX.Element {
@@ -199,13 +61,15 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
+  const [source, setSource] = useState<SourceFilter>('all')
+  const [grouping, setGrouping] = useState<Grouping>('project')
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [multiSelect, setMultiSelect] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
-  /** 目录/Agent 过滤：'all' 或某个 rootId */
-  const [rootFilter, setRootFilter] = useState<string>('all')
   /** 待确认删除的文件路径集合（单个或批量），null 表示无待确认 */
   const [pendingDelete, setPendingDelete] = useState<string[] | null>(null)
+  const addSessionCustomDir = useApp((state) => state.addSessionCustomDir)
 
   const load = useCallback(
     (): Promise<void> =>
@@ -225,63 +89,74 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
     void load()
   }, [load])
 
-  const filtered = useMemo(() => {
+  const searched = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return sessions
     return sessions.filter(
       (s) =>
         s.title.toLowerCase().includes(q) ||
+        s.summary.toLowerCase().includes(q) ||
         s.cwd.toLowerCase().includes(q) ||
         s.id.toLowerCase().includes(q)
     )
   }, [sessions, query])
 
-  /** 每个 root 的会话数（用于下拉展示计数） */
-  const countByRoot = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const s of sessions) map.set(s.rootId, (map.get(s.rootId) ?? 0) + 1)
-    return map
-  }, [sessions])
-
-  /** 下拉可选的目录：存在的 root（含计数），保证选中项始终有效 */
-  const filterRoots = useMemo(() => roots.filter((r) => r.exists), [roots])
-
-  /** 当前过滤后的可见会话（先按搜索，再按选中目录） */
-  const visible = useMemo(
-    () => (rootFilter === 'all' ? filtered : filtered.filter((s) => s.rootId === rootFilter)),
-    [filtered, rootFilter]
+  const counts = useMemo(
+    () => ({
+      all: searched.length,
+      pi: searched.filter((s) => s.agent === 'pi').length,
+      omp: searched.filter((s) => s.agent === 'omp').length
+    }),
+    [searched]
   )
+
+  const visible = useMemo(
+    () => (source === 'all' ? searched : searched.filter((s) => s.agent === source)),
+    [searched, source]
+  )
+
+  const totalSize = useMemo(() => sessions.reduce((sum, s) => sum + s.size, 0), [sessions])
+
+  const groups = useMemo<SessionGroup[]>(() => {
+    const buckets = new Map<string, SessionMeta[]>()
+    for (const s of visible) {
+      const key = grouping === 'project' ? projectGroupKey(s.cwd) : timeBucket(s.updatedAt)
+      const list = buckets.get(key)
+      if (list) list.push(s)
+      else buckets.set(key, [s])
+    }
+    const result = [...buckets].map(([key, list]) => ({
+      key,
+      label:
+        grouping === 'project' ? (key === UNCLASSIFIED_GROUP ? '未归类' : projectName(key)) : key,
+      sessions: list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    }))
+    if (grouping === 'time') {
+      return result.sort((a, b) => TIME_ORDER.indexOf(a.key) - TIME_ORDER.indexOf(b.key))
+    }
+    // 未归类固定在末尾，其余按组内最近会话时间倒序
+    return result.sort((a, b) => {
+      if (a.key === UNCLASSIFIED_GROUP) return 1
+      if (b.key === UNCLASSIFIED_GROUP) return -1
+      return (b.sessions[0]?.updatedAt ?? '').localeCompare(a.sessions[0]?.updatedAt ?? '')
+    })
+  }, [visible, grouping])
 
   const active = useMemo(
     () => sessions.find((s) => s.filePath === activeFilePath) ?? null,
     [sessions, activeFilePath]
   )
-  const activeRoot = active ? (roots.find((r) => r.id === active.rootId) ?? null) : null
-  const activeAgent = activeRoot ? rootAgent(activeRoot) : null
-  const resumeCommand =
-    active && activeAgent === 'omp'
-      ? `omp --resume ${active.id}`
-      : active && activeAgent === 'pi'
-        ? `pi --session ${active.id}`
-        : null
+  const activeRootLabel = active
+    ? (roots.find((r) => r.id === active.rootId)?.label ?? undefined)
+    : undefined
 
-  const copyResumeCommand = async (): Promise<void> => {
-    if (!resumeCommand) return
-    try {
-      await navigator.clipboard.writeText(resumeCommand)
-      toast.success('\u6062\u590d\u547d\u4ee4\u5df2\u590d\u5236')
-    } catch (error) {
-      toast.error(`\u590d\u5236\u5931\u8d25\uff1a${errorMessage(error)}`)
-    }
-  }
-
-  const openWorkingDirectory = async (): Promise<void> => {
-    if (!active?.cwd) return
-    try {
-      await window.api.openSessionWorkingDirectory(active.filePath)
-    } catch (error) {
-      toast.error(`\u6253\u5f00\u5de5\u4f5c\u76ee\u5f55\u5931\u8d25\uff1a${errorMessage(error)}`)
-    }
+  const toggleGroup = (key: string): void => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
   }
 
   const toggleSelect = (filePath: string): void => {
@@ -318,9 +193,14 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
     }
   }
 
+  const handleAddDir = async (): Promise<void> => {
+    await addSessionCustomDir()
+    await load()
+  }
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between">
+      <div className="flex shrink-0 items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <Button
             variant="outline"
@@ -332,29 +212,27 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
             <ArrowLeft />
           </Button>
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold">会话管理</h2>
-              {/* 会话跨 Agent 汇总，标注覆盖的 Agent */}
-              <span className="flex items-center gap-1">
-                {AGENT_IDS.map((id) => (
-                  <AgentIcon key={id} agent={id} className="size-4" />
-                ))}
-              </span>
-            </div>
-            <p className="text-muted-foreground mt-0.5 text-sm">
-              按目录浏览 pi / omp 的历史会话，支持查看原文与删除（共 {sessions.length} 个）
+            <h2 className="text-lg leading-tight font-semibold tracking-[-0.01em]">会话管理</h2>
+            <p className="text-muted-foreground mt-1 text-xs">
+              {sessions.length} 个会话 · {formatSize(totalSize)}
             </p>
           </div>
         </div>
-        <Button variant="outline" size="sm" title="重新读取" onClick={() => void load()}>
-          <RefreshCw />
-          刷新
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => void handleAddDir()}>
+            <FolderPlus />
+            添加目录
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => void load()}>
+            <RefreshCw />
+            刷新
+          </Button>
+        </div>
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 gap-4 overflow-hidden">
-        {/* 左栏：搜索 + 多选 + 分组列表 */}
-        <div className="flex w-80 min-w-0 shrink-0 flex-col gap-3 overflow-hidden">
+        {/* 左栏：搜索 + 来源 + 分组 + 列表 */}
+        <div className="flex w-80 min-w-0 shrink-0 flex-col gap-2 overflow-hidden">
           <div className="flex shrink-0 items-center gap-2">
             <div className="relative flex-1">
               <Search className="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
@@ -365,13 +243,14 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
                 id="session-search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索标题 / 目录 / ID"
+                placeholder="搜索标题 / 项目 / ID"
                 className="pl-8"
               />
             </div>
             <Button
               variant={multiSelect ? 'default' : 'outline'}
               size="icon"
+              className="size-9 shrink-0"
               title={multiSelect ? '退出多选' : '多选删除'}
               onClick={() => (multiSelect ? exitMultiSelect() : setMultiSelect(true))}
             >
@@ -379,207 +258,175 @@ export default function SessionsPage({ onBack }: { onBack?: () => void }): React
             </Button>
           </div>
 
-          <Select value={rootFilter} onValueChange={setRootFilter}>
-            <SelectTrigger className="w-full" aria-label="按会话目录筛选">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部目录（{sessions.length}）</SelectItem>
-              {filterRoots.map((root) => {
-                const agent = rootAgent(root)
-                return (
-                  <SelectItem key={root.id} value={root.id}>
-                    <span className="flex items-center gap-2">
-                      {agent && <AgentIcon agent={agent} className="size-4" />}
-                      {root.label}（{countByRoot.get(root.id) ?? 0}）
-                    </span>
-                  </SelectItem>
-                )
-              })}
-            </SelectContent>
-          </Select>
+          {/* 来源与分组都用带边框的按钮，选中项用实心主色填充 */}
+          <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              {(['all', 'pi', 'omp'] as const).map((id) => (
+                <Button
+                  key={id}
+                  variant={source === id ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-7 min-w-0 flex-1 px-1.5 text-xs"
+                  onClick={() => setSource(id)}
+                >
+                  {id === 'all' ? '全部' : id === 'pi' ? 'Pi' : 'OMP'}
+                  <span className="tabular-nums opacity-60">{counts[id]}</span>
+                </Button>
+              ))}
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                variant={grouping === 'project' ? 'default' : 'outline'}
+                size="icon"
+                className="size-7"
+                title="按项目分组"
+                onClick={() => setGrouping('project')}
+              >
+                <LayoutList />
+              </Button>
+              <Button
+                variant={grouping === 'time' ? 'default' : 'outline'}
+                size="icon"
+                className="size-7"
+                title="按时间分组"
+                onClick={() => setGrouping('time')}
+              >
+                <Clock />
+              </Button>
+            </div>
+          </div>
 
           {multiSelect && (
-            <div className="flex shrink-0 items-center justify-between gap-2">
+            <div className="flex shrink-0 items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={toggleSelectAll}
                 className="text-muted-foreground hover:text-foreground text-xs"
               >
-                {selected.size === visible.length && visible.length > 0 ? '清空选择' : '全选'}
+                {selected.size === visible.length && visible.length > 0 ? '清空' : '全选'}
               </button>
               <Button
-                variant="destructive"
+                variant="ghost"
                 size="sm"
                 disabled={selected.size === 0}
                 onClick={() => setPendingDelete([...selected])}
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive h-7 px-2 text-xs disabled:opacity-40"
               >
-                <Trash2 />
-                删除所选 ({selected.size})
+                <Trash2 className="size-3.5" />
+                删除{selected.size > 0 ? ` ${selected.size}` : ''}
               </Button>
             </div>
           )}
 
-          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pr-0.5">
+          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pr-1 pb-4">
             {loading ? (
               <div className="text-muted-foreground py-16 text-center text-sm">加载中…</div>
-            ) : visible.length === 0 ? (
+            ) : groups.length === 0 ? (
               <div className="text-muted-foreground py-16 text-center text-sm">
                 {sessions.length === 0 ? '暂无会话' : '没有匹配的会话'}
               </div>
             ) : (
-              <div className="flex min-w-0 flex-col gap-1.5">
-                {visible.map((s) => {
-                  const isActive = s.filePath === activeFilePath
-                  const itemRoot = roots.find((r) => r.id === s.rootId) ?? null
-                  const itemAgent = itemRoot ? rootAgent(itemRoot) : null
-                  return (
-                    <div
-                      key={s.filePath}
-                      className={cn(
-                        'flex min-w-0 gap-2 overflow-hidden rounded-lg border px-3 py-2 text-left transition-colors',
-                        isActive
-                          ? 'border-primary bg-accent'
-                          : 'hover:bg-accent/50 border-black/[0.06] dark:border-white/[0.08]'
-                      )}
-                    >
-                      {multiSelect && (
-                        <input
-                          type="checkbox"
-                          checked={selected.has(s.filePath)}
-                          onChange={() => toggleSelect(s.filePath)}
-                          aria-label={`选择会话：${s.title}`}
-                          className="accent-primary mt-1 size-3.5 shrink-0"
-                        />
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setActiveFilePath(s.filePath)}
-                        aria-current={isActive ? 'true' : undefined}
-                        className="flex min-w-0 flex-1 flex-col gap-0.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      >
-                        <span className="truncate text-sm font-medium">{s.title}</span>
-                        <span className="text-muted-foreground/80 truncate font-mono text-[11px]">
-                          {s.cwd || '—'}
-                        </span>
-                        <div className="text-muted-foreground flex min-w-0 items-center gap-2 overflow-hidden text-[11px]">
-                          <span className="shrink-0">{relativeTime(s.updatedAt)}</span>
-                          {itemAgent ? (
-                            <span className="flex shrink-0 items-center" title={itemRoot?.label}>
-                              <AgentIcon agent={itemAgent} className="size-3.5" />
-                            </span>
+              groups.map((group) => {
+                // 单会话项目不再各占一条组头：项目路径已在卡片第二行，归属照样清楚
+                const showHeader =
+                  grouping === 'time' ||
+                  group.sessions.length > 1 ||
+                  group.key === UNCLASSIFIED_GROUP
+                const isCollapsed = showHeader && collapsed.has(group.key)
+                return (
+                  <div key={group.key} className="mb-2 last:mb-0">
+                    {showHeader && (
+                      <div className="bg-background sticky top-0 z-20 py-1.5">
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(group.key)}
+                          aria-expanded={!isCollapsed}
+                          className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 px-1 text-left transition-colors"
+                        >
+                          {isCollapsed ? (
+                            <ChevronRight className="size-3 shrink-0" />
                           ) : (
-                            rootFilter === 'all' &&
-                            itemRoot && (
-                              <Badge variant="secondary" className="shrink-0 text-[10px]">
-                                {rootBadge(itemRoot)}
-                              </Badge>
-                            )
+                            <ChevronDown className="size-3 shrink-0" />
                           )}
-                          <span className="ml-auto shrink-0">{formatSize(s.size)}</span>
-                        </div>
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
+                          <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
+                            {group.label}
+                          </span>
+                          <span className="text-[11px] tabular-nums opacity-70">
+                            {group.sessions.length}
+                          </span>
+                        </button>
+                      </div>
+                    )}
+                    {!isCollapsed && (
+                      <div className="flex flex-col gap-2 pt-1">
+                        {group.sessions.map((s) => {
+                          const isActive = s.filePath === activeFilePath
+                          return (
+                            <div
+                              key={s.filePath}
+                              className={cn(
+                                'flex min-w-0 items-start gap-2 rounded-xl border px-3 py-2.5 transition-colors',
+                                isActive
+                                  ? 'border-primary/70 bg-primary/[0.05] shadow-xs'
+                                  : 'border-black/[0.08] hover:bg-accent/40 dark:border-white/[0.10]'
+                              )}
+                            >
+                              {multiSelect && (
+                                <input
+                                  type="checkbox"
+                                  checked={selected.has(s.filePath)}
+                                  onChange={() => toggleSelect(s.filePath)}
+                                  aria-label={`选择会话：${s.title}`}
+                                  className="accent-primary mt-0.5 size-3.5 shrink-0"
+                                />
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setActiveFilePath(s.filePath)}
+                                aria-current={isActive ? 'true' : undefined}
+                                className="flex min-w-0 flex-1 flex-col gap-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                              >
+                                <span
+                                  className="line-clamp-3 text-[13px] leading-snug font-medium"
+                                  title={s.title}
+                                >
+                                  {s.title}
+                                </span>
+                                <span className="text-muted-foreground flex min-w-0 items-center gap-2 text-[11px]">
+                                  <span className="min-w-0 flex-1 truncate" title={s.cwd}>
+                                    {s.cwd || '—'}
+                                  </span>
+                                  <span className="shrink-0">{relativeTime(s.updatedAt)}</span>
+                                  <span className="shrink-0 tabular-nums">
+                                    {formatSize(s.size)}
+                                  </span>
+                                </span>
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
             )}
           </div>
         </div>
 
-        {/* 右栏：详情 + 原始 JSONL */}
+        {/* 右栏：结构化阅读器 */}
         <div className="bg-card flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-black/[0.06] dark:border-white/[0.08]">
           {active ? (
-            <>
-              <div className="shrink-0 border-b border-black/[0.06] p-4 dark:border-white/[0.08]">
-                <div className="mb-3 flex items-start justify-between gap-3">
-                  <h3
-                    className="min-w-0 flex-1 truncate text-base font-semibold"
-                    title={active.title}
-                  >
-                    {active.title}
-                  </h3>
-                  <div className="flex shrink-0 gap-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      title="在文件夹中显示"
-                      onClick={() => void window.api.showSessionInFolder(active.filePath)}
-                    >
-                      <FolderOpen />
-                      打开文件夹
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-destructive hover:text-destructive"
-                      title="删除该会话"
-                      onClick={() => setPendingDelete([active.filePath])}
-                    >
-                      <Trash2 />
-                      删除
-                    </Button>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <MetaRow
-                    label="所在目录"
-                    value={activeRoot ? `${activeRoot.label}（${activeRoot.path}）` : '—'}
-                  />
-                  <MetaRow label="会话 ID" value={active.id} />
-                  {resumeCommand && (
-                    <div className="grid grid-cols-[5rem_1fr] items-center gap-2">
-                      <span className="text-muted-foreground shrink-0 text-xs">恢复命令</span>
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <code className="bg-muted text-foreground/90 min-w-0 flex-1 break-all rounded px-2 py-1 text-xs">
-                          {resumeCommand}
-                        </code>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 shrink-0"
-                          title="复制恢复命令"
-                          onClick={() => void copyResumeCommand()}
-                        >
-                          <Copy aria-hidden="true" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  <div className="grid grid-cols-[5rem_1fr] items-center gap-2">
-                    <span className="text-muted-foreground shrink-0 text-xs">工作目录</span>
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <span className="text-foreground/90 min-w-0 flex-1 break-all text-xs">
-                        {active.cwd || '—'}
-                      </span>
-                      {active.cwd && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 shrink-0"
-                          title="打开工作目录"
-                          onClick={() => void openWorkingDirectory()}
-                        >
-                          <FolderOpen aria-hidden="true" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                  <MetaRow label="创建时间" value={formatDateTime(active.createdAt)} />
-                  <MetaRow label="修改时间" value={formatDateTime(active.updatedAt)} />
-                  <MetaRow label="模型" value={active.model || '—'} />
-                  <MetaRow label="文件大小" value={formatSize(active.size)} />
-                  <MetaRow label="完整路径" value={active.filePath} />
-                </div>
-              </div>
-              <div className="min-h-0 min-w-0 flex-1">
-                <RawViewer key={active.filePath} filePath={active.filePath} />
-              </div>
-            </>
+            <SessionReader
+              key={active.filePath}
+              session={active}
+              rootLabel={activeRootLabel}
+              onRequestDelete={(filePath) => setPendingDelete([filePath])}
+            />
           ) : (
             <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm">
               <FileText className="size-8 opacity-40" />
-              从左侧选择一个会话查看详情与原始内容
+              从左侧选择一个会话查看详情与结构化内容
             </div>
           )}
         </div>

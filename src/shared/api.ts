@@ -19,6 +19,7 @@ import type {
   SessionMeta,
   SessionRaw,
   SessionRootInfo,
+  SessionTranscript,
   SkillsListResult,
   SkillsShSkill,
   SkillSyncMode,
@@ -147,8 +148,10 @@ export interface PreloadApi {
   toggleMcpServer(name: string, agentId: AgentId, enabled: boolean): Promise<void>
   /** 列出所有已探测到的会话根目录（默认 home + env 覆盖 + 用户自定义），供设置页展示 */
   sessionRoots(): Promise<SessionRootInfo[]>
-  /** 遍历所有会话根目录，读取每个 .jsonl 头部元信息（不含正文），按修改时间倒序 */
+  /** 遍历所有会话根目录，读取轻量元数据索引（头尾 16KB + 未变更项走缓存），按修改时间倒序 */
   listSessions(): Promise<SessionMeta[]>
+  /** 按需加载单个会话的结构化全文与统计（过大文件时截断） */
+  sessionTranscript(filePath: string): Promise<SessionTranscript>
   /** 读取单个会话文件的原始文本（供只读查看），过大时截断 */
   readSessionRaw(filePath: string): Promise<SessionRaw>
   /** 批量删除会话：删 .jsonl + 同名日志目录 +（变空的）项目目录，路径受根目录约束 */

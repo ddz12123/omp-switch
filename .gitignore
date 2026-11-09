@@ -1,8 +1,38 @@
+# 依赖
 node_modules
+
+# 构建产物
+# dist   = electron-builder 安装包输出
+# out    = electron-vite 编译输出
+# build/ 是打包资源目录（图标、entitlements），保持跟踪
 dist
 out
-.DS_Store
-.eslintcache
+*.tsbuildinfo
+
+# 本地临时文件（对照脚本、下载的包等）
+temp
+
+# 日志与缓存
 *.log*
+.eslintcache
+
+# 环境变量（示例文件除外）
+.env
+.env.*
+!.env.example
+
+# IDE / 编辑器
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+.idea
+
+# 工具目录
 .workbuddy
 .mimosa
+
+# 操作系统杂项
+.DS_Store
+Thumbs.db
+Desktop.ini

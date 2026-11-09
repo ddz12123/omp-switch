@@ -463,7 +463,7 @@ export interface SessionRootInfo {
   exists: boolean
 }
 
-/** 单个会话的列表元信息（从 JSONL 头部解析，不含正文） */
+/** 单个会话的列表元信息（只读头尾 16KB 解析，不含正文） */
 export interface SessionMeta {
   /** 所属会话根目录标识（= SessionRootInfo.id） */
   rootId: string
@@ -471,16 +471,20 @@ export interface SessionMeta {
   id: string
   /** .jsonl 文件绝对路径 */
   filePath: string
-  /** 标题：type:title 优先，其次 type:session.title，再退回文件名 */
+  /** 标题：title 记录 → title_change → session_info.name → 首条 user 文本 → 文件名 */
   title: string
+  /** 首条 user 消息文本（120 字内），列表行摘要 */
+  summary: string
   /** 会话真实工作目录（type:session.cwd） */
   cwd: string
   /** 会话创建时间（type:session.timestamp 的 ISO 串，缺失为空串） */
   createdAt: string
   /** 文件最后修改时间（fs.stat mtime 的 ISO 串） */
   updatedAt: string
-  /** 首个 model_change 的模型标识（可空） */
+  /** 最后一条 model_change 归一化后的模型标识（provider/model，可空） */
   model?: string
+  /** 归属 Agent（根目录来源推断 + 路径/记录方言兜底），决定恢复命令 */
+  agent: AgentId | null
   /** 文件字节数 */
   size: number
 }
@@ -490,6 +494,65 @@ export interface SessionRaw {
   filePath: string
   content: string
   /** 内容是否因过大被截断 */
+  truncated: boolean
+}
+
+/** 一次工具调用；args 为紧凑 JSON 文本并做长度截断，避免庞大参数进入 IPC */
+export interface SessionToolCall {
+  id: string
+  name: string
+  args: string
+}
+
+export type SessionMessageRole = 'user' | 'assistant' | 'toolResult'
+
+/**
+ * 结构化阅读器用的单条消息。
+ * 只保留展示所需字段：providerPayload、contextSnapshot、details、
+ * thinkingSignature 等大字段一律不进入渲染层。
+ */
+export interface SessionMessage {
+  role: SessionMessageRole
+  /** 正文（所有 text 块拼接，单块最多 2KB） */
+  text: string
+  /** 思考内容（单块最多 2KB，默认折叠展示） */
+  thinking?: string
+  toolCalls?: SessionToolCall[]
+  toolCallId?: string
+  toolName?: string
+  isError?: boolean
+  /** 记录时间戳（ISO 串，缺失为空串） */
+  ts: string
+  /** assistant 本次回复的 totalTokens（缺失或为 0 时不展示） */
+  tokens?: number
+  /** assistant 实际使用的模型（provider/model） */
+  model?: string
+  /** stopReason=error/aborted 或 errorMessage 存在的错误说明 */
+  errorMessage?: string
+}
+
+/** 会话全文汇总统计（只保留阅读器真正展示的计数） */
+export interface SessionStats {
+  messages: number
+  questions: number
+  toolCalls: number
+  errors: number
+  totalTokens: number
+  /** 去重后出现过的模型（model_change 与 assistant 消息） */
+  models: string[]
+  /** 首条记录时间（ISO 串，缺失为空串） */
+  startedAt: string
+  /** 末条记录时间（ISO 串，缺失为空串） */
+  endedAt: string
+}
+
+/** 按需加载的结构化会话全文 */
+export interface SessionTranscript {
+  /** 校验通过的会话文件绝对路径 */
+  filePath: string
+  messages: SessionMessage[]
+  stats: SessionStats
+  /** 文件超过 24MB，仅解析了前 24MB 的完整行 */
   truncated: boolean
 }
 

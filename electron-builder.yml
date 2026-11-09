@@ -2,9 +2,17 @@ appId: io.github.ddz12123.omp-switch
 productName: omp-switch
 directories:
   buildResources: build
+# 安装包最大化压缩（构建耗时略增），NSIS/lzma 与 asar 均受益
+compression: maximum
+# 只保留中英文 Electron locale，省约 40MB 安装体积（zh-CN 命中 zh-CN.pak，en-US 兜底）
+electronLanguages:
+  - en-US
+  - zh-CN
 files:
   - '!**/.vscode/*'
   - '!src/*'
+  - '!temp'
+  - '!{.github,.husky,scripts,.workbuddy,.mimosa}'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml,pnpm-workspace.yaml}'

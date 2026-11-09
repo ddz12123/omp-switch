@@ -1,8 +1,19 @@
-import { existsSync } from 'fs'
+import { existsSync, type Stats } from 'fs'
 import { lstat, open, readdir, readFile, realpath, rm, rmdir, stat } from 'fs/promises'
 import { homedir } from 'os'
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'path'
-import type { SessionMeta, SessionRaw, SessionRootInfo, SessionRootKind } from '../shared/types'
+import type {
+  AgentId,
+  SessionMessage,
+  SessionMessageRole,
+  SessionMeta,
+  SessionRaw,
+  SessionRootInfo,
+  SessionRootKind,
+  SessionStats,
+  SessionToolCall,
+  SessionTranscript
+} from '../shared/types'
 import { readAppConfig } from './appConfig'
 import { getOmpAgentDir, getOmpProfile } from './agents'
 
@@ -13,7 +24,8 @@ import { getOmpAgentDir, getOmpProfile } from './agents'
  * - PI_CODING_AGENT_DIR：整个 agent home（会话在 <home>/sessions）
  * - PI_CODING_AGENT_SESSION_DIR：直接指定会话目录
  * 二者只有默认 home 不同（~/.pi/agent vs ~/.omp/agent）。
- * 这里不做格式猜测，枚举所有可能的会话根目录，去重后按目录分组展示。
+ * 会话文件同为 version:3 JSONL，仅字段方言不同（model_change / 标题），
+ * 因此用一套解析器 + 按记录自动适配方言，root 来源只是优先提示。
  */
 
 const OMP_DEFAULT_SESSIONS = join(homedir(), '.omp', 'agent', 'sessions')
@@ -21,12 +33,21 @@ const PI_DEFAULT_SESSIONS = join(homedir(), '.pi', 'agent', 'sessions')
 const ENV_AGENT_DIR = 'PI_CODING_AGENT_DIR'
 const ENV_SESSION_DIR = 'PI_CODING_AGENT_SESSION_DIR'
 
-/** 列表阶段每个会话文件只读前 16KB 提取头部元信息，避免全量读大文件 */
+/** 列表阶段每个会话文件只读头/尾各 16KB，避免全量读大文件 */
 const HEAD_BYTES = 16 * 1024
+const TAIL_BYTES = 16 * 1024
 /** 原始查看上限，超出截断（大会话文件可达数 MB） */
 const RAW_MAX_BYTES = 8 * 1024 * 1024
-/** 递归扫描会话文件的最大深度（<root>/<项目>/<file>.jsonl，留余量兼容历史结构） */
-const MAX_SCAN_DEPTH = 4
+/** 结构化全文加载上限，超出只读前 24MB 的完整行 */
+const TRANSCRIPT_MAX_BYTES = 24 * 1024 * 1024
+/** 单块文本/工具参数上限，原始视图仍可看全 */
+const TEXT_BLOCK_MAX = 2 * 1024
+/** 扫描文件的并发池大小 */
+const SCAN_CONCURRENCY = 8
+/** 头部被超长 system prompt / 内嵌图片占满时，为找首条 user 消息额外读的上限 */
+const META_USER_SCAN_BYTES = 512 * 1024
+const TITLE_MAX = 60
+const SUMMARY_MAX = 120
 
 /** 规范化为可比较的绝对路径 */
 function normalizeId(path: string): string {
@@ -195,19 +216,26 @@ async function readHead(filePath: string, bytes: number): Promise<string> {
   }
 }
 
-interface HeadMeta {
-  id?: string
-  title?: string
-  cwd?: string
-  createdAt?: string
-  model?: string
+/** 读取文件末尾若干字节（尾部 model_change / 标题需要）；首行可能残破，调用方跳过 */
+async function readTail(filePath: string, bytes: number, size: number): Promise<string> {
+  if (size <= 0) return ''
+  const start = Math.max(0, size - bytes)
+  const length = Math.min(bytes, size)
+  const fh = await open(filePath, 'r')
+  try {
+    const buf = Buffer.alloc(length)
+    const { bytesRead } = await fh.read(buf, 0, length, start)
+    return buf.subarray(0, bytesRead).toString('utf-8')
+  } finally {
+    await fh.close()
+  }
 }
 
-/** 逐行解析头部 JSON 记录，抽取会话元信息（容错：坏行/半行跳过） */
-function parseHeadMeta(head: string): HeadMeta {
-  const meta: HeadMeta = {}
-  for (const line of head.split('\n')) {
-    const trimmed = line.trim()
+/** 逐行解析 JSON 记录，坏行/半行跳过；tail 的首行一律丢弃 */
+function* parseRecords(chunk: string, skipFirstLine = false): Generator<Record<string, unknown>> {
+  const lines = chunk.split('\n')
+  for (let i = skipFirstLine ? 1 : 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
     if (!trimmed) continue
     let rec: unknown
     try {
@@ -215,69 +243,321 @@ function parseHeadMeta(head: string): HeadMeta {
     } catch {
       continue
     }
-    if (typeof rec !== 'object' || rec === null) continue
-    const r = rec as Record<string, unknown>
-    if (r.type === 'title') {
-      if (typeof r.title === 'string' && !meta.title) meta.title = r.title
-    } else if (r.type === 'session') {
-      if (typeof r.id === 'string') meta.id = r.id
-      if (typeof r.cwd === 'string') meta.cwd = r.cwd
-      if (typeof r.timestamp === 'string') meta.createdAt = r.timestamp
-      if (typeof r.title === 'string' && !meta.title) meta.title = r.title
-    } else if (r.type === 'model_change') {
-      if (typeof r.model === 'string' && !meta.model) meta.model = r.model
+    if (typeof rec === 'object' && rec !== null && !Array.isArray(rec)) {
+      yield rec as Record<string, unknown>
     }
   }
-  return meta
 }
 
-/** 递归收集目录下的 .jsonl 文件（有界深度） */
-async function collectJsonl(dir: string, depth = 0): Promise<string[]> {
-  if (depth > MAX_SCAN_DEPTH) return []
-  const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function asNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function truncateText(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value
+}
+
+/** 动态拼接避免正则字面量里出现控制字符（ESLint no-control-regex） */
+const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, 'g')
+
+function stripAnsi(value: string): string {
+  return value.replace(ANSI_PATTERN, '')
+}
+
+function oneLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Agent 会把图片附件与上下文以标记/XML 注入 user 文本，结构化阅读时不应原样展示。
+ * 这里只做展示层清洗，原始 JSON 视图仍通过 readSessionRaw 看全文。
+ */
+const INJECTED_CONTEXT =
+  /<t3_context[\s\S]*?<\/t3_context>|<system-reminder[\s\S]*?<\/system-reminder>|<context\b[^>]*>/gi
+const IMAGE_MARKER = /\[Image:\s*([^\];]+?)\s*(?:;[\s\S]*?)?\]/gi
+const ATTACHED_IMAGE = /\[Attached image\s+"[^"]*"[^\]]*\]/gi
+const ATTACHMENT_META = /^(?:name|mimeType|sizeBytes|attachmentId|ref)\s*:\s*[^\n]*$/gim
+
+function cleanDisplayText(value: string): string {
+  return value
+    .replace(INJECTED_CONTEXT, '')
+    .replace(IMAGE_MARKER, (_match, name: string) => `［图片附件：${name.trim()}］`)
+    .replace(ATTACHED_IMAGE, '')
+    .replace(ATTACHMENT_META, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/** content 兼容字符串与块数组两种形态，只取 text 块 */
+function extractText(content: unknown): string {
+  if (typeof content === 'string') return cleanDisplayText(stripAnsi(content))
+  if (!Array.isArray(content)) return ''
+  const parts: string[] = []
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue
+    const b = block as Record<string, unknown>
+    if (b.type === 'text' && typeof b.text === 'string') {
+      parts.push(cleanDisplayText(stripAnsi(b.text)))
+    }
+  }
+  return parts.join('\n')
+}
+
+/**
+ * 方言适配：
+ * - omp：model_change.model 已是 provider/model
+ * - pi：model_change.provider + modelId 归一为 provider/modelId
+ * 两种字段同时识别，因此 env/custom 等来源无需预先知道方言。
+ */
+function normalizeModelChange(rec: Record<string, unknown>): string {
+  const model = asString(rec.model).trim()
+  if (model) return model
+  const provider = asString(rec.provider).trim()
+  const modelId = asString(rec.modelId).trim()
+  return [provider, modelId].filter(Boolean).join('/')
+}
+
+function normalizeMessageModel(message: Record<string, unknown>): string {
+  const provider = asString(message.provider).trim()
+  const model = asString(message.model).trim()
+  if (!model) return ''
+  if (provider && !model.includes('/') && !model.startsWith(`${provider}/`)) {
+    return `${provider}/${model}`
+  }
+  return model
+}
+
+/** root kind 推断 + 路径兜底（/.omp/ → omp、/.pi/ → pi） */
+function inferAgentFromRoot(root: SessionRootInfo | null): AgentId | null {
+  if (!root) return null
+  if (root.kind === 'omp-default') return 'omp'
+  if (root.kind === 'pi-default') return 'pi'
+  const parts = normalizeId(root.path).toLowerCase().split(/[\\/]/)
+  if (parts.includes('.omp')) return 'omp'
+  if (parts.includes('.pi')) return 'pi'
+  return null
+}
+
+interface ParsedSessionMeta {
+  id: string
+  title: string
+  summary: string
+  /** 首条 user 文本（未截断），供 buildSessionMeta 做大头部补偿 */
+  firstUserText: string
+  cwd: string
+  createdAt: string
+  model?: string
+  agent: AgentId | null
+}
+
+/**
+ * 轻量元数据索引：只读头 16KB + 尾 16KB。
+ * 标题优先级：title 记录（空串跳过）→ title_change → pi session_info.name →
+ * 首条 user 文本（60 字）→ 文件名。model 取头尾合并后的最后一条 model_change。
+ */
+export function parseSessionMeta(
+  head: string,
+  tail: string,
+  fileBase: string,
+  root: SessionRootInfo | null = null
+): ParsedSessionMeta {
+  let id = ''
+  let cwd = ''
+  let createdAt = ''
+  let titleRecord = ''
+  let titleChange = ''
+  let sessionInfoName = ''
+  let firstUserText = ''
+  let model = ''
+  let sawPi = false
+  let sawOmp = false
+
+  // 头尾可能有重叠；重复的旧记录不影响"取最后一条"的结果
+  for (const rec of [...parseRecords(head), ...parseRecords(tail, true)]) {
+    const type = asString(rec.type)
+    if (type === 'session') {
+      if (!id) id = asString(rec.id)
+      if (!cwd) cwd = asString(rec.cwd)
+      if (!createdAt) createdAt = asString(rec.timestamp)
+      if (asString(rec.titleSource) || asString(rec.title)) sawOmp = true
+    } else if (type === 'title') {
+      const value = asString(rec.title).trim()
+      if (value) titleRecord = value
+    } else if (type === 'title_change') {
+      const value = asString(rec.title).trim()
+      if (value) titleChange = value
+    } else if (type === 'session_info') {
+      const value = asString(rec.name).trim()
+      if (value) sessionInfoName = value
+      sawPi = true
+    } else if (type === 'model_change') {
+      const value = normalizeModelChange(rec)
+      if (value) model = value
+      if (asString(rec.model)) sawOmp = true
+      else if (asString(rec.provider) || asString(rec.modelId)) sawPi = true
+    } else if (type === 'message' && !firstUserText) {
+      const raw = rec.message
+      if (typeof raw === 'object' && raw !== null) {
+        const message = raw as Record<string, unknown>
+        if (message.role === 'user') firstUserText = oneLine(extractText(message.content))
+      }
+    }
+  }
+
+  const title =
+    titleRecord ||
+    titleChange ||
+    sessionInfoName ||
+    truncateText(firstUserText, TITLE_MAX) ||
+    truncateText(fileBase, TITLE_MAX)
+  const agent =
+    inferAgentFromRoot(root) ?? (sawPi && !sawOmp ? 'pi' : sawOmp && !sawPi ? 'omp' : null)
+
+  return {
+    id,
+    title,
+    summary: truncateText(firstUserText, SUMMARY_MAX),
+    firstUserText,
+    cwd,
+    createdAt,
+    model: model || undefined,
+    agent
+  }
+}
+
+async function buildSessionMeta(
+  filePath: string,
+  root: SessionRootInfo | null,
+  st: Stats
+): Promise<SessionMeta> {
+  const head = await readHead(filePath, HEAD_BYTES)
+  const tail = st.size > HEAD_BYTES ? await readTail(filePath, TAIL_BYTES, st.size) : ''
+  const fileBase = basename(filePath).replace(/\.jsonl$/i, '')
+  const parsed = parseSessionMeta(head, tail, fileBase, root)
+
+  // 有些会话开头是一整段超长 system prompt，16KB 头部里根本没有 user 记录。
+  // 这时只补读一次更大的头部找首条 user 文本，其余字段仍以头尾解析结果为准。
+  if (!parsed.firstUserText && st.size > HEAD_BYTES) {
+    const widerHead = await readHead(filePath, Math.min(st.size, META_USER_SCAN_BYTES))
+    const wider = parseSessionMeta(widerHead, '', fileBase, root)
+    if (wider.firstUserText) {
+      parsed.firstUserText = wider.firstUserText
+      parsed.summary = truncateText(wider.firstUserText, SUMMARY_MAX)
+      if (parsed.title === truncateText(fileBase, TITLE_MAX)) {
+        parsed.title = truncateText(wider.firstUserText, TITLE_MAX)
+      }
+    }
+  }
+  return {
+    rootId: root?.id ?? '',
+    id: parsed.id || fileBase,
+    filePath,
+    title: parsed.title,
+    summary: parsed.summary,
+    cwd: parsed.cwd,
+    createdAt: parsed.createdAt,
+    updatedAt: st.mtime.toISOString(),
+    model: parsed.model,
+    agent: parsed.agent,
+    size: st.size
+  }
+}
+
+/** 读取单个会话文件的元信息（不校验 root 归属，供内部与验证脚本使用） */
+export async function readSessionMeta(
+  filePath: string,
+  root: SessionRootInfo | null = null
+): Promise<SessionMeta> {
+  return buildSessionMeta(filePath, root, await lstat(filePath))
+}
+
+/**
+ * 只认 root/<项目>/<file>.jsonl 三层结构：
+ * 跳过 subagent-artifacts 目录、与 .jsonl 同名的 sidecar 目录（其中的嵌套 jsonl 是子代理/日志噪声）。
+ * 目录项一律不递归，符号链接（Dirent.isFile=false）也不会被收集。
+ */
+async function collectSessionFiles(root: string): Promise<string[]> {
+  const projects = await readdir(root, { withFileTypes: true }).catch(() => [])
   const files: string[] = []
-  for (const entry of entries) {
-    const full = join(dir, entry.name)
-    if (entry.isDirectory()) {
-      files.push(...(await collectJsonl(full, depth + 1)))
-    } else if (entry.isFile() && /\.jsonl$/i.test(entry.name)) {
-      files.push(full)
+  for (const project of projects) {
+    if (!project.isDirectory() || project.name.toLowerCase() === 'subagent-artifacts') continue
+    const projectPath = join(root, project.name)
+    const entries = await readdir(projectPath, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      if (entry.isFile() && /\.jsonl$/i.test(entry.name)) files.push(join(projectPath, entry.name))
     }
   }
   return files
 }
 
-/** 遍历所有存在的会话根目录，读取每个 .jsonl 头部元信息，按修改时间倒序 */
-export async function listSessions(): Promise<SessionMeta[]> {
-  const roots = await resolveSessionRoots()
-  const result: SessionMeta[] = []
-  for (const root of roots) {
-    if (!root.exists) continue
-    const files = await collectJsonl(root.path)
-    for (const filePath of files) {
-      try {
-        const resolved = await assertSessionPathInRoots([root], filePath)
-        const st = await lstat(resolved)
-        const meta = parseHeadMeta(await readHead(resolved, HEAD_BYTES))
-        const fileBase = basename(filePath).replace(/\.jsonl$/i, '')
-        result.push({
-          rootId: root.id,
-          id: meta.id || fileBase,
-          filePath,
-          title: meta.title || fileBase,
-          cwd: meta.cwd || '',
-          createdAt: meta.createdAt || '',
-          updatedAt: st.mtime.toISOString(),
-          model: meta.model,
-          size: st.size
-        })
-      } catch {
-        // 单个文件读失败不影响整体列表
-      }
+/** 固定大小的并发池，避免一次性打开成百上千个文件 */
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  const worker = async (): Promise<void> => {
+    while (cursor < items.length) {
+      const index = cursor++
+      results[index] = await fn(items[index])
     }
   }
-  result.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  return result
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
+}
+
+interface CachedSessionMeta {
+  mtimeMs: number
+  size: number
+  rootId: string
+  meta: SessionMeta
+}
+
+/** 模块级元数据缓存：刷新时只 lstat，未变更项直接复用，消失项剔除 */
+const metaCache = new Map<string, CachedSessionMeta>()
+
+/** 遍历所有会话根目录，读取轻量元数据索引，按修改时间倒序 */
+export async function listSessions(): Promise<SessionMeta[]> {
+  const roots = (await resolveSessionRoots()).filter((root) => root.exists)
+  const groups = await Promise.all(
+    roots.map(async (root) => ({ root, files: await collectSessionFiles(root.path) }))
+  )
+  const tasks = groups.flatMap(({ root, files }) => files.map((filePath) => ({ root, filePath })))
+
+  const alive = new Set(tasks.map(({ filePath }) => normalizeId(filePath)))
+  for (const key of metaCache.keys()) if (!alive.has(key)) metaCache.delete(key)
+
+  const metas = await mapPool(tasks, SCAN_CONCURRENCY, async ({ root, filePath }) => {
+    const key = normalizeId(filePath)
+    try {
+      const st = await lstat(filePath)
+      if (!st.isFile()) return null
+      const cached = metaCache.get(key)
+      if (
+        cached &&
+        cached.mtimeMs === st.mtimeMs &&
+        cached.size === st.size &&
+        cached.rootId === root.id
+      ) {
+        return cached.meta
+      }
+      const resolved = await assertSessionPathInRoots([root], filePath)
+      const meta = await buildSessionMeta(resolved, root, st)
+      // 列表/删除/查看都按渲染层传回的原始路径定位，保持与 resolveSessionRoots 一致
+      meta.filePath = filePath
+      metaCache.set(key, { mtimeMs: st.mtimeMs, size: st.size, rootId: root.id, meta })
+      return meta
+    } catch {
+      // 单个文件读失败或路径校验失败不影响整体列表
+      return null
+    }
+  })
+
+  return metas
+    .filter((meta): meta is SessionMeta => meta !== null)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 
 /** 读取单个会话文件原始文本（供只读查看），过大截断 */
@@ -291,10 +571,178 @@ export async function readSessionRaw(filePath: string): Promise<SessionRaw> {
   return { filePath: resolved, content: await readFile(resolved, 'utf-8'), truncated: false }
 }
 
+function recordTimestamp(rec: Record<string, unknown>): string {
+  const ts = rec.timestamp
+  if (typeof ts === 'string' && ts) return ts
+  if (typeof ts === 'number' && Number.isFinite(ts)) {
+    const date = new Date(ts)
+    if (!Number.isNaN(date.getTime())) return date.toISOString()
+  }
+  return ''
+}
+
+function messageTimestamp(message: Record<string, unknown>): string {
+  const ts = message.timestamp
+  if (typeof ts === 'number' && Number.isFinite(ts)) {
+    const date = new Date(ts)
+    if (!Number.isNaN(date.getTime())) return date.toISOString()
+  }
+  return ''
+}
+
+function compactArgs(value: unknown): string {
+  if (value === undefined || value === null) return ''
+  try {
+    const json = JSON.stringify(value)
+    return typeof json === 'string' ? truncateText(json, TEXT_BLOCK_MAX) : ''
+  } catch {
+    return ''
+  }
+}
+
+/** 只取阅读器会展示的 totalTokens，其余 usage 字段一律不进 IPC */
+function normalizeTokens(value: unknown): number {
+  if (typeof value !== 'object' || value === null) return 0
+  return asNumber((value as Record<string, unknown>).totalTokens)
+}
+
+/**
+ * 解析单条 message 记录为结构化消息。
+ * 只拷贝展示所需字段，providerPayload / details / toolResult.details /
+ * contextSnapshot / thinkingSignature 等大字段全部剥离。
+ */
+function parseSessionMessage(message: Record<string, unknown>, ts: string): SessionMessage {
+  const role = asString(message.role) as SessionMessageRole
+  const texts: string[] = []
+  const thinkings: string[] = []
+  const toolCalls: SessionToolCall[] = []
+  const content = message.content
+
+  if (typeof content === 'string') {
+    const text = cleanDisplayText(stripAnsi(content))
+    if (text) texts.push(truncateText(text, TEXT_BLOCK_MAX))
+  } else if (Array.isArray(content)) {
+    for (const item of content) {
+      if (typeof item !== 'object' || item === null) continue
+      const block = item as Record<string, unknown>
+      if (block.type === 'text') {
+        const text = cleanDisplayText(stripAnsi(asString(block.text)))
+        if (text) texts.push(truncateText(text, TEXT_BLOCK_MAX))
+      } else if (block.type === 'thinking') {
+        const thinking = cleanDisplayText(
+          stripAnsi(asString(block.thinking) || asString(block.text))
+        )
+        if (thinking) thinkings.push(truncateText(thinking, TEXT_BLOCK_MAX))
+      } else if (block.type === 'toolCall') {
+        toolCalls.push({
+          id: asString(block.id),
+          name: asString(block.name) || '未知工具',
+          args: compactArgs(block.arguments ?? block.args)
+        })
+      }
+    }
+  }
+
+  const result: SessionMessage = {
+    role,
+    text: texts.join('\n'),
+    ts: ts || messageTimestamp(message)
+  }
+  if (thinkings.length) result.thinking = thinkings.join('\n')
+  if (toolCalls.length) result.toolCalls = toolCalls
+
+  if (role === 'toolResult') {
+    result.toolCallId = asString(message.toolCallId)
+    result.toolName = asString(message.toolName) || '未知工具'
+    result.isError = message.isError === true
+  }
+  if (role === 'assistant') {
+    const tokens = normalizeTokens(message.usage)
+    if (tokens > 0) result.tokens = tokens
+    const model = normalizeMessageModel(message)
+    if (model) result.model = model
+    const stopReason = asString(message.stopReason)
+    const errorMessage = asString(message.errorMessage)
+    if (errorMessage || stopReason === 'error' || stopReason === 'aborted') {
+      result.errorMessage = errorMessage || `${stopReason}（未提供错误详情）`
+    }
+  }
+  return result
+}
+
+/**
+ * 按需加载结构化全文：整文件读（上限 24MB，超出截断），逐行解析 type:message 记录，
+ * 同时汇总消息/工具/错误计数、tokens、模型与起止时间。
+ */
+export async function loadTranscript(filePath: string): Promise<SessionTranscript> {
+  const resolved = await assertSessionPath(filePath)
+  const st = await lstat(resolved)
+  const truncated = st.size > TRANSCRIPT_MAX_BYTES
+  const content = truncated
+    ? await readHead(resolved, TRANSCRIPT_MAX_BYTES)
+    : await readFile(resolved, 'utf-8')
+  const lines = content.split('\n')
+  if (truncated) lines.pop() // 截断处最后一行通常残破
+
+  const messages: SessionMessage[] = []
+  const stats: SessionStats = {
+    messages: 0,
+    questions: 0,
+    toolCalls: 0,
+    errors: 0,
+    totalTokens: 0,
+    models: [],
+    startedAt: '',
+    endedAt: ''
+  }
+  const models = new Set<string>()
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    let rec: unknown
+    try {
+      rec = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
+    if (typeof rec !== 'object' || rec === null) continue
+    const record = rec as Record<string, unknown>
+    const ts = recordTimestamp(record)
+    if (ts && !stats.startedAt) stats.startedAt = ts
+    if (ts) stats.endedAt = ts
+
+    if (record.type === 'model_change') {
+      const model = normalizeModelChange(record)
+      if (model) models.add(model)
+      continue
+    }
+    if (record.type !== 'message') continue
+    const raw = record.message
+    if (typeof raw !== 'object' || raw === null) continue
+    const rawMessage = raw as Record<string, unknown>
+    const role = asString(rawMessage.role)
+    if (role !== 'user' && role !== 'assistant' && role !== 'toolResult') continue
+
+    const message = parseSessionMessage(rawMessage, ts)
+    messages.push(message)
+    stats.messages++
+    if (role === 'user') stats.questions++
+    stats.toolCalls += message.toolCalls?.length ?? 0
+    if (message.errorMessage) stats.errors++
+    if (role === 'toolResult' && message.isError) stats.errors++
+    stats.totalTokens += message.tokens ?? 0
+    if (message.model) models.add(message.model)
+  }
+
+  stats.models = [...models]
+  return { filePath: resolved, messages, stats, truncated }
+}
+
 /** Resolve the existing working directory recorded inside a validated session file. */
 export async function resolveSessionWorkingDirectory(filePath: string): Promise<string> {
   const resolvedSession = await assertSessionPath(filePath)
-  const meta = parseHeadMeta(await readHead(resolvedSession, HEAD_BYTES))
+  const meta = await readSessionMeta(resolvedSession)
   const expanded = meta.cwd ? expandTilde(meta.cwd.trim()) : ''
   if (!expanded || !isAbsolute(expanded)) {
     throw new Error('Session does not contain a valid absolute working directory')
@@ -327,6 +775,7 @@ export async function deleteSessions(filePaths: string[]): Promise<{ deleted: nu
   const resolvedPaths = [
     ...new Set(await Promise.all(filePaths.map((path) => assertSessionPathInRoots(roots, path))))
   ]
+  for (const path of [...filePaths, ...resolvedPaths]) metaCache.delete(normalizeId(path))
 
   for (const resolved of resolvedPaths) {
     await rm(resolved, { force: true })

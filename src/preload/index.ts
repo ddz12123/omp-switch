@@ -71,6 +71,7 @@ const api: PreloadApi = {
   sessionRoots: () => ipcRenderer.invoke('sessions:roots'),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   readSessionRaw: (filePath) => ipcRenderer.invoke('sessions:read-raw', filePath),
+  sessionTranscript: (filePath) => ipcRenderer.invoke('sessions:transcript', filePath),
   deleteSessions: (filePaths) => ipcRenderer.invoke('sessions:delete', filePaths),
   showSessionInFolder: (filePath) => ipcRenderer.invoke('sessions:show-in-folder', filePath),
   openSessionWorkingDirectory: (filePath) =>

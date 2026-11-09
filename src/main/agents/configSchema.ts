@@ -14,12 +14,13 @@ import {
  * key 支持点路径，写回时只改对应路径，未知字段原样保留。
  *
  * 字段清单对照版本（升级 CLI 时手工核对）：
- * - pi：@earendil-works/pi-coding-agent 1.3.x，59 个顶层键（含 $schema，即 58 个配置键），
- *   1.4.0 复核仍为 59 键（queueMode 已标记 deprecated 迁移至 steeringMode，不收），
+ * - pi：@earendil-works/pi-coding-agent 1.5.0，61 个顶层键（含 $schema，即 60 个配置键；
+ *   1.5.0 新增 extensionChangelogVersions / selfUpdateCommand，queueMode 已标记
+ *   deprecated 迁移至 steeringMode，均不收），
  *   权威来源 https://pi.dev/schemas/settings.schema.json（与 npm 包内 schemas/ 逐字节一致）
- * - omp：@oh-my-pi/pi-coding-agent 18.12.x，权威清单 559 键（18.12.6 `omp config list --json`）；
+ * - omp：@oh-my-pi/pi-coding-agent 18.18.2，权威清单 604 键（18.18.2 `omp config list --json`）；
  *   该命令只给 type 不给枚举取值，选项要对照 dist/cli.js 里
- *   `id:"xxx",type:"enum",values:[...]` 的定义
+ *   `id:"xxx",type:"enum",values:[...]` 的定义（18.18.2 edit.mode 新增 none 取值）
  *
  * 收录原则：只收「改完能立刻感知」的高频项。内部阈值、细粒度调参、排查用开关
  * （retry.provider 下的超时/重试、compaction 的空闲与回合中压缩阈值、
@@ -716,8 +717,8 @@ export const OMP_CONFIG_SCHEMA: ConfigFieldGroup[] = [
         key: 'edit.mode',
         type: 'select',
         label: '编辑模式',
-        desc: '编辑工具的实现变体，默认 hashline',
-        options: ['hashline', 'apply_patch', 'patch', 'replace', 'sloppy']
+        desc: '编辑工具的实现变体，默认 hashline；none 移除 edit 工具、保留 bash',
+        options: ['hashline', 'apply_patch', 'patch', 'replace', 'sloppy', 'none']
       },
       { key: 'edit.fuzzyMatch', type: 'boolean', label: '模糊匹配', desc: '容忍空白差异' },
       { key: 'lsp.diagnosticsOnEdit', type: 'boolean', label: '编辑后返回诊断' },

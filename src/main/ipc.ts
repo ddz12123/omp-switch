@@ -55,6 +55,7 @@ import {
 import {
   deleteSessions,
   listSessions,
+  loadTranscript,
   readSessionRaw,
   resolveSafeSessionPath,
   resolveSessionRoots,
@@ -402,6 +403,9 @@ export function registerIpc(refreshTray: () => void): void {
   handle('sessions:list', () => listSessions())
 
   handle('sessions:read-raw', (_e, filePath: string) => readSessionRaw(filePath))
+
+  /** 按需加载结构化全文（只有选中会话时才读整文件） */
+  handle('sessions:transcript', (_e, filePath: string) => loadTranscript(filePath))
 
   handle('sessions:delete', (_e, filePaths: string[]) => deleteSessions(filePaths))
 
